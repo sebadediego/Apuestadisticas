@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getFixtures, getOdds, getPredictions, getHeadToHead, getLiveFixtures } from '@/lib/api-football';
 import { processFixtureForContext, processOddsForContext, processPredictionForContext, processH2HForContext } from '@/lib/data-processor';
 
+const OPENAI_KEY = process.env.OPENAI_API_KEY || '';
 const GROQ_KEY = process.env.GROQ_API_KEY || '';
 
 const SYSTEM = `Sos "Apuestadisticas Bot", un experto en apuestas de futbol. Sos como un amigo que sabe mucho de futbol y apuestas.
@@ -68,7 +69,14 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: userMsg },
     ];
 
-    const response = await callGroq(messages);
+    // Try OpenAI first (best), then Groq fallback
+    let response = '';
+    if (OPENAI_KEY) {
+      response = await callOpenAI(messages);
+    }
+    if (!response && GROQ_KEY) {
+      response = await callGroq(messages);
+    }
     return NextResponse.json({ response: response || 'Disculpa, hubo un problema. Intenta de nuevo.' });
   } catch (error: any) {
     console.error('Assistant error:', error);
@@ -262,6 +270,25 @@ function addDays(d: string, n: number): string {
   const dt = new Date(d + 'T12:00:00Z');
   dt.setDate(dt.getDate() + n);
   return dt.toISOString().split('T')[0];
+}
+
+async function callOpenAI(messages: any[]): Promise<string> {
+  if (!OPENAI_KEY) return '';
+  try {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENAI_KEY },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages, max_tokens: 2500, temperature: 0.7 }),
+    });
+    const data = await res.json();
+    if (data.error) { console.error('[OpenAI Error]', JSON.stringify(data.error)); return ''; }
+    const text = data.choices?.[0]?.message?.content || '';
+    if (text) console.log('[Assistant] OpenAI responded OK');
+    return text;
+  } catch (e: any) {
+    console.error('[OpenAI Exception]', e.message);
+    return '';
+  }
 }
 
 async function callGroq(messages: any[]): Promise<string> {

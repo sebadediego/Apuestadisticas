@@ -286,6 +286,18 @@ body {
   min-width: 0;
 }
 
+@media (max-width: 374px) {
+  .match-team-name {
+    font-size: 11px;
+  }
+  .match-time {
+    width: 36px;
+  }
+  .match-time-text {
+    font-size: 10px;
+  }
+}
+
 .match-team-name.loser {
   opacity: 0.45;
 }
@@ -311,10 +323,20 @@ body {
   flex-shrink: 0;
 }
 
-/* CAMBIO 8: Ocultar cuotas en pantallas muy chicas */
-@media (max-width: 399px) {
+/* Cuotas always visible — smaller on tiny screens */
+@media (max-width: 374px) {
   .match-odds {
-    display: none;
+    gap: 2px;
+  }
+  .odd-pill {
+    min-width: 32px;
+    padding: 2px 4px;
+  }
+  .odd-pill-value {
+    font-size: 10px;
+  }
+  .odd-pill-label {
+    font-size: 7px;
   }
 }
 
