@@ -8,13 +8,15 @@ import Link from 'next/link';
 export const revalidate = 60;
 
 interface Props {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }
 
-export default async function MatchDetailPage({ params }: Props) {
-  const fixtureId = parseInt(params.id);
+const AFFILIATE_LINK = 'https://lkpq.cc/b8edf9';
 
-  // Fetch all data in parallel
+export default async function MatchDetailPage({ params }: Props) {
+  const { id } = await params;
+  const fixtureId = parseInt(id);
+
   const [fixtureRes, statsRes, eventsRes, lineupsRes, oddsRes, predRes] = await Promise.allSettled([
     getFixtures({ id: fixtureId }),
     getFixtureStatistics(fixtureId),
@@ -33,10 +35,11 @@ export default async function MatchDetailPage({ params }: Props) {
 
   if (!fixture) {
     return (
-      <div className="page-enter max-w-4xl mx-auto px-4 py-20 text-center">
-        <p className="text-4xl mb-4">😕</p>
-        <p className="text-text-secondary text-lg">No se encontró el partido.</p>
-        <Link href="/partidos" className="text-accent-emerald text-sm mt-3 inline-block hover:underline">← Volver a partidos</Link>
+      <div className="layout-main" style={{ textAlign: 'center', padding: '60px 20px' }}>
+        <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>No se encontro el partido.</p>
+        <Link href="/partidos" style={{ color: 'var(--accent-green)', fontSize: 13, marginTop: 12, display: 'inline-block' }}>
+          Volver a partidos
+        </Link>
       </div>
     );
   }
@@ -45,23 +48,24 @@ export default async function MatchDetailPage({ params }: Props) {
   const teams = fixture.teams;
   const goals = fixture.goals;
   const league = fixture.league;
-  const status = FIXTURE_STATUS[f?.status?.short] || { label: f?.status?.long || '?', color: 'text-text-muted', live: false };
+  const status = FIXTURE_STATUS[f?.status?.short] || { label: f?.status?.long || '?', color: '', live: false };
+  const isFinished = ['FT', 'AET', 'PEN'].includes(f?.status?.short);
+  const hasScore = goals?.home !== null;
 
-  // H2H
   let h2hMatches: any[] = [];
   if (teams?.home?.id && teams?.away?.id) {
     try {
-      const h2hRes = await getHeadToHead({ h2h: `${teams.home.id}-${teams.away.id}`, last: 10 });
+      const h2hRes = await getHeadToHead({ h2h: `${teams.home.id}-${teams.away.id}`, last: 5 });
       h2hMatches = h2hRes.response || [];
     } catch {}
   }
 
   const matchDate = f?.date
     ? new Date(f.date).toLocaleString('es-AR', { dateStyle: 'full', timeStyle: 'short' })
-    : 'Fecha no disponible';
+    : '';
 
   // Extract odds
-  const getOddValues = (betName: string) => {
+  const getMarket = (betName: string) => {
     if (!oddsData?.bookmakers?.length) return null;
     for (const bk of oddsData.bookmakers) {
       const bet = bk.bets?.find((b: any) => b.name === betName);
@@ -70,307 +74,234 @@ export default async function MatchDetailPage({ params }: Props) {
     return null;
   };
 
-  const matchWinner = getOddValues('Match Winner');
-  const overUnder = getOddValues('Goals Over/Under');
-  const btts = getOddValues('Both Teams Score');
+  const matchWinner = getMarket('Match Winner');
+  const overUnder = getMarket('Goals Over/Under');
+  const btts = getMarket('Both Teams Score');
 
   return (
-    <div className="page-enter max-w-5xl mx-auto px-4 py-8">
-      {/* Back */}
-      <Link href="/partidos" className="text-text-muted text-sm hover:text-accent-emerald transition-colors mb-4 inline-block">
+    <div className="layout-main" style={{ paddingBottom: 20 }}>
+      {/* Back link */}
+      <Link href="/partidos" style={{ color: 'var(--text-muted)', fontSize: 12, display: 'inline-block', padding: '12px 0 8px', textDecoration: 'none' }}>
         ← Volver a partidos
       </Link>
 
-      {/* Match header */}
-      <div className="glass-card p-6 md:p-8 mb-6">
-        <div className="text-center mb-2">
-          <div className="flex items-center justify-center gap-2 text-xs text-text-muted mb-4">
-            {league?.logo && <img src={league.logo} alt="" className="w-4 h-4" />}
-            <span>{league?.name} — {league?.country}</span>
-          </div>
+      {/* Match Header Card */}
+      <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: 20, marginBottom: 10 }}>
+        {/* League */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
+          {league?.logo && <img src={league.logo} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} />}
+          <span>{league?.name} — {league?.country}</span>
         </div>
 
-        <div className="flex items-center justify-between gap-4 md:gap-8">
+        {/* Teams + Score */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           {/* Home */}
-          <div className="flex-1 text-center">
-            {teams?.home?.logo && <img src={teams.home.logo} alt="" className="w-16 h-16 md:w-20 md:h-20 mx-auto mb-2 object-contain" />}
-            <p className={`font-display font-bold text-base md:text-lg ${teams?.home?.winner ? 'text-text-primary' : 'text-text-secondary'}`}>
+          <div style={{ flex: 1, textAlign: 'center' }}>
+            {teams?.home?.logo && <img src={teams.home.logo} alt="" style={{ width: 52, height: 52, objectFit: 'contain', margin: '0 auto 6px' }} />}
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>
               {teams?.home?.name}
-            </p>
+            </div>
           </div>
 
-          {/* Score */}
-          <div className="text-center flex-shrink-0">
-            {status.live || f?.status?.short === 'FT' || f?.status?.short === 'AET' || f?.status?.short === 'PEN' ? (
+          {/* Score / VS */}
+          <div style={{ textAlign: 'center', flexShrink: 0 }}>
+            {hasScore ? (
               <>
-                <div className="flex items-center gap-3 font-mono font-extrabold text-4xl md:text-5xl text-text-primary">
-                  <span>{goals?.home ?? 0}</span>
-                  <span className="text-text-muted text-2xl">:</span>
-                  <span>{goals?.away ?? 0}</span>
+                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 32, color: 'var(--text-primary)' }}>
+                  {goals?.home}:{goals?.away}
                 </div>
-                <span className={`badge mt-2 ${status.live ? 'badge-live live-pulse' : 'badge-finished'}`}>
-                  {f?.status?.elapsed ? `${f.status.elapsed}'` : status.label}
-                </span>
+                <div style={{
+                  display: 'inline-block', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+                  background: status.live ? 'var(--accent-green-bg)' : 'var(--bg-elevated)',
+                  color: status.live ? 'var(--accent-green)' : 'var(--text-muted)',
+                  border: status.live ? '1px solid var(--accent-green-border)' : '1px solid var(--border-subtle)',
+                }}>
+                  {f?.status?.elapsed ? f.status.elapsed + "'" : status.label}
+                </div>
               </>
             ) : (
               <>
-                <p className="font-mono font-bold text-2xl text-accent-cyan">VS</p>
-                <span className="badge badge-upcoming mt-2">{status.label}</span>
+                <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 22, color: 'var(--accent-cyan)' }}>VS</div>
+                <div style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: 'var(--bg-elevated)', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)' }}>
+                  {status.label}
+                </div>
               </>
             )}
-            <p className="text-xs text-text-muted mt-3">{matchDate}</p>
-            {f?.venue?.name && (
-              <p className="text-xs text-text-muted">📍 {f.venue.name}, {f.venue.city}</p>
-            )}
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>{matchDate}</div>
           </div>
 
           {/* Away */}
-          <div className="flex-1 text-center">
-            {teams?.away?.logo && <img src={teams.away.logo} alt="" className="w-16 h-16 md:w-20 md:h-20 mx-auto mb-2 object-contain" />}
-            <p className={`font-display font-bold text-base md:text-lg ${teams?.away?.winner ? 'text-text-primary' : 'text-text-secondary'}`}>
+          <div style={{ flex: 1, textAlign: 'center' }}>
+            {teams?.away?.logo && <img src={teams.away.logo} alt="" style={{ width: 52, height: 52, objectFit: 'contain', margin: '0 auto 6px' }} />}
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, color: 'var(--text-primary)' }}>
               {teams?.away?.name}
-            </p>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Tabs content */}
-      <div className="grid gap-6 md:grid-cols-2">
-        {/* Statistics */}
-        {stats.length > 0 && (
-          <div className="glass-card p-5 md:col-span-2">
-            <h2 className="font-display font-bold text-lg text-text-primary mb-4">📊 Estadísticas</h2>
-            <div className="space-y-3">
-              {(stats[0]?.statistics || []).map((stat: any, i: number) => {
-                const homeVal = stat.value ?? 0;
-                const awayStat = stats[1]?.statistics?.[i];
-                const awayVal = awayStat?.value ?? 0;
-                const homeNum = typeof homeVal === 'string' ? parseFloat(homeVal) || 0 : homeVal;
-                const awayNum = typeof awayVal === 'string' ? parseFloat(awayVal) || 0 : awayVal;
-                const total = homeNum + awayNum || 1;
+      {/* Events */}
+      {events.length > 0 && (
+        <Section title="Eventos">
+          {events.map((e: any, i: number) => {
+            const icon = e.type === 'Goal' ? '⚽' : e.detail === 'Yellow Card' ? '🟨' : e.detail === 'Red Card' ? '🟥' : e.type === 'subst' ? '🔄' : '📌';
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: 13 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-muted)', width: 36 }}>{e.time?.elapsed}&apos;</span>
+                <span>{icon}</span>
+                <span style={{ color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.player?.name || '?'}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{e.detail}</span>
+              </div>
+            );
+          })}
+        </Section>
+      )}
 
-                return (
-                  <div key={stat.type}>
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="font-mono text-text-primary w-12 text-right">{homeVal}</span>
-                      <span className="text-text-muted text-xs flex-1 text-center">{stat.type}</span>
-                      <span className="font-mono text-text-primary w-12 text-left">{awayVal}</span>
-                    </div>
-                    <div className="flex gap-1">
-                      <div className="flex-1 flex justify-end">
-                        <div className="h-1.5 rounded-full bg-accent-emerald/30" style={{ width: `${(homeNum / total) * 100}%` }}>
-                          <div className="h-full rounded-full bg-accent-emerald" style={{ width: '100%' }} />
-                        </div>
-                      </div>
-                      <div className="flex-1">
-                        <div className="h-1.5 rounded-full bg-accent-cyan/30" style={{ width: `${(awayNum / total) * 100}%` }}>
-                          <div className="h-full rounded-full bg-accent-cyan" style={{ width: '100%' }} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+      {/* Cuotas */}
+      {matchWinner && (
+        <Section title="Cuotas">
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>Fuente: {matchWinner.bookmaker}</div>
 
-        {/* Events */}
-        {events.length > 0 && (
-          <div className="glass-card p-5">
-            <h2 className="font-display font-bold text-lg text-text-primary mb-4">📋 Eventos</h2>
-            <div className="space-y-2 max-h-80 overflow-y-auto">
-              {events.map((e: any, i: number) => {
-                const isHome = e.team?.id === teams?.home?.id;
-                const icon = e.type === 'Goal' ? '⚽' : e.type === 'Card' ? (e.detail === 'Yellow Card' ? '🟨' : '🟥') : e.type === 'subst' ? '🔄' : '📌';
-                return (
-                  <div key={i} className={`flex items-center gap-3 text-sm p-2 rounded-lg ${isHome ? 'bg-accent-emerald/5' : 'bg-accent-cyan/5'}`}>
-                    <span className="font-mono text-text-muted text-xs w-10">{e.time?.elapsed}'{e.time?.extra ? `+${e.time.extra}` : ''}</span>
-                    <span>{icon}</span>
-                    <span className="text-text-primary truncate">{e.player?.name || '?'}</span>
-                    <span className="text-text-muted text-xs ml-auto truncate">{e.detail}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Lineups */}
-        {lineups.length > 0 && (
-          <div className="glass-card p-5">
-            <h2 className="font-display font-bold text-lg text-text-primary mb-4">👥 Alineaciones</h2>
-            <div className="space-y-4">
-              {lineups.map((lineup: any) => (
-                <div key={lineup.team?.id}>
-                  <div className="flex items-center gap-2 mb-2">
-                    {lineup.team?.logo && <img src={lineup.team.logo} alt="" className="w-5 h-5" />}
-                    <span className="text-sm font-semibold text-text-primary">{lineup.team?.name}</span>
-                    <span className="text-xs text-accent-emerald font-mono">{lineup.formation}</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1">
-                    {(lineup.startXI || []).map((p: any, i: number) => (
-                      <div key={i} className="flex items-center gap-2 text-xs text-text-secondary py-0.5">
-                        <span className="font-mono text-text-muted w-5">{p.player?.number}</span>
-                        <span className="truncate">{p.player?.name}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>1X2</div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {matchWinner.values.map((v: any) => (
+                <a key={v.value} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="apuesta-odd" style={{ flex: 1 }}>
+                  <span className="apuesta-odd-label">{v.value === 'Home' ? 'Local' : v.value === 'Draw' ? 'Empate' : 'Visitante'}</span>
+                  <span className="apuesta-odd-value">{v.odd}</span>
+                </a>
               ))}
             </div>
           </div>
-        )}
 
-        {/* Odds */}
-        {(matchWinner || overUnder || btts) && (
-          <div className="glass-card p-5">
-            <h2 className="font-display font-bold text-lg text-text-primary mb-4">📊 Cuotas</h2>
-            <p className="text-[10px] text-text-muted mb-3">Fuente: {matchWinner?.bookmaker || oddsData?.bookmakers?.[0]?.name || 'N/D'}</p>
-
-            {matchWinner && (
-              <div className="mb-4">
-                <p className="text-xs text-text-muted mb-2 uppercase tracking-wide">1X2</p>
-                <div className="flex gap-2">
-                  {matchWinner.values.map((v: any) => (
-                    <div key={v.value} className="odds-btn flex-1">
-                      <span className="label">{v.value === 'Home' ? 'Local' : v.value === 'Draw' ? 'Empate' : 'Visitante'}</span>
-                      <span className="value">{v.odd}</span>
-                    </div>
-                  ))}
-                </div>
+          {overUnder && (
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>OVER/UNDER</div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {overUnder.values.map((v: any, i: number) => (
+                  <a key={i} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="odd-pill">
+                    <span className="odd-pill-label">{v.value}</span>
+                    <span className="odd-pill-value">{v.odd}</span>
+                  </a>
+                ))}
               </div>
-            )}
-
-            {overUnder && (
-              <div className="mb-4">
-                <p className="text-xs text-text-muted mb-2 uppercase tracking-wide">Over/Under</p>
-                <div className="flex flex-wrap gap-2">
-                  {overUnder.values.map((v: any) => (
-                    <div key={v.value} className="odds-btn">
-                      <span className="label">{v.value}</span>
-                      <span className="value">{v.odd}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {btts && (
-              <div>
-                <p className="text-xs text-text-muted mb-2 uppercase tracking-wide">Ambos Marcan</p>
-                <div className="flex gap-2">
-                  {btts.values.map((v: any) => (
-                    <div key={v.value} className="odds-btn flex-1">
-                      <span className="label">{v.value === 'Yes' ? 'Sí' : 'No'}</span>
-                      <span className="value">{v.odd}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Prediction */}
-        {prediction && (
-          <div className="glass-card p-5">
-            <h2 className="font-display font-bold text-lg text-text-primary mb-4">🎯 Predicción</h2>
-
-            {prediction.predictions?.winner?.name && (
-              <div className="flex items-center gap-3 mb-4 p-3 rounded-lg bg-accent-emerald/5 border border-accent-emerald/10">
-                <span className="text-xl">🏆</span>
-                <div>
-                  <p className="text-sm font-semibold text-text-primary">Ganador probable: {prediction.predictions.winner.name}</p>
-                  {prediction.predictions.advice && (
-                    <p className="text-xs text-text-muted mt-0.5">{prediction.predictions.advice}</p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {prediction.predictions?.percent && (
-              <div className="mb-4">
-                <p className="text-xs text-text-muted mb-2">Probabilidades</p>
-                <div className="flex gap-2">
-                  {[
-                    { label: 'Local', value: prediction.predictions.percent.home, color: 'bg-accent-emerald' },
-                    { label: 'Empate', value: prediction.predictions.percent.draw, color: 'bg-accent-amber' },
-                    { label: 'Visitante', value: prediction.predictions.percent.away, color: 'bg-accent-cyan' },
-                  ].map((p) => (
-                    <div key={p.label} className="flex-1 text-center">
-                      <div className="h-2 rounded-full bg-bg-primary mb-1 overflow-hidden">
-                        <div className={`h-full rounded-full ${p.color}`} style={{ width: p.value || '0%' }} />
-                      </div>
-                      <p className="text-xs text-text-muted">{p.label}</p>
-                      <p className="font-mono font-bold text-sm text-text-primary">{p.value || 'N/D'}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {prediction.comparison && (
-              <div>
-                <p className="text-xs text-text-muted mb-2">Comparación</p>
-                <div className="space-y-2">
-                  {Object.entries(prediction.comparison).map(([key, val]: [string, any]) => (
-                    <div key={key} className="flex items-center gap-2 text-xs">
-                      <span className="font-mono text-accent-emerald w-10 text-right">{val.home}</span>
-                      <div className="flex-1">
-                        <div className="h-1 rounded-full bg-bg-primary flex overflow-hidden">
-                          <div className="h-full bg-accent-emerald" style={{ width: val.home || '50%' }} />
-                          <div className="h-full bg-accent-cyan" style={{ width: val.away || '50%' }} />
-                        </div>
-                      </div>
-                      <span className="font-mono text-accent-cyan w-10">{val.away}</span>
-                      <span className="text-text-muted w-20 text-center">{key}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* H2H */}
-        {h2hMatches.length > 0 && (
-          <div className="glass-card p-5 md:col-span-2">
-            <h2 className="font-display font-bold text-lg text-text-primary mb-4">⚔️ Historial (H2H)</h2>
-            <div className="space-y-2">
-              {h2hMatches.slice(0, 10).map((m: any) => {
-                const d = m.fixture?.date ? new Date(m.fixture.date).toLocaleDateString('es-AR') : '?';
-                const hGoals = m.goals?.home ?? '?';
-                const aGoals = m.goals?.away ?? '?';
-                return (
-                  <div key={m.fixture?.id} className="flex items-center gap-3 text-sm p-2 rounded-lg bg-bg-primary/50">
-                    <span className="text-xs text-text-muted font-mono w-20">{d}</span>
-                    <span className={`flex-1 text-right truncate ${hGoals > aGoals ? 'text-text-primary font-semibold' : 'text-text-secondary'}`}>
-                      {m.teams?.home?.name}
-                    </span>
-                    <span className="font-mono font-bold text-text-primary px-2">
-                      {hGoals} - {aGoals}
-                    </span>
-                    <span className={`flex-1 truncate ${aGoals > hGoals ? 'text-text-primary font-semibold' : 'text-text-secondary'}`}>
-                      {m.teams?.away?.name}
-                    </span>
-                    <span className="text-[10px] text-text-muted truncate max-w-[80px]">{m.league?.name}</span>
-                  </div>
-                );
-              })}
             </div>
-          </div>
-        )}
+          )}
 
-        {/* No data fallback */}
-        {stats.length === 0 && events.length === 0 && lineups.length === 0 && !matchWinner && !prediction && h2hMatches.length === 0 && (
-          <div className="glass-card p-8 text-center md:col-span-2">
-            <p className="text-3xl mb-3">📭</p>
-            <p className="text-text-secondary">Los datos detallados aún no están disponibles para este partido.</p>
-            <p className="text-text-muted text-sm mt-1">Las estadísticas, alineaciones y cuotas se cargan cerca del inicio del partido.</p>
-          </div>
-        )}
-      </div>
+          {btts && (
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, fontWeight: 600 }}>AMBOS MARCAN</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {btts.values.map((v: any) => (
+                  <a key={v.value} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="apuesta-odd" style={{ flex: 1 }}>
+                    <span className="apuesta-odd-label">{v.value === 'Yes' ? 'Si' : 'No'}</span>
+                    <span className="apuesta-odd-value">{v.odd}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <a href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="pred-bet-btn" style={{ marginTop: 12 }}>
+            Ver mas mercados en 1Win
+          </a>
+        </Section>
+      )}
+
+      {/* Prediction */}
+      {prediction?.predictions && (
+        <Section title="Prediccion">
+          {prediction.predictions.winner?.name && (
+            <div className="apuesta-prediction" style={{ marginBottom: 10 }}>
+              <span style={{ fontWeight: 600 }}>Ganador probable:</span> {prediction.predictions.winner.name}
+            </div>
+          )}
+
+          {prediction.predictions.percent && (
+            <div className="pred-bar-container" style={{ marginBottom: 10 }}>
+              <div className="pred-bar">
+                <div className="home" style={{ width: prediction.predictions.percent.home || '33%' }} />
+                <div className="draw" style={{ width: prediction.predictions.percent.draw || '34%' }} />
+                <div className="away" style={{ width: prediction.predictions.percent.away || '33%' }} />
+              </div>
+              <div className="pred-bar-labels">
+                <span className="pred-bar-label home">Local {prediction.predictions.percent.home}</span>
+                <span className="pred-bar-label draw">Empate {prediction.predictions.percent.draw}</span>
+                <span className="pred-bar-label away">Visitante {prediction.predictions.percent.away}</span>
+              </div>
+            </div>
+          )}
+
+          {prediction.predictions.advice && (
+            <div className="pred-advice">{prediction.predictions.advice}</div>
+          )}
+        </Section>
+      )}
+
+      {/* Statistics */}
+      {stats.length >= 2 && (
+        <Section title="Estadisticas">
+          {(stats[0]?.statistics || []).map((stat: any, i: number) => {
+            const homeVal = stat.value ?? 0;
+            const awayStat = stats[1]?.statistics?.[i];
+            const awayVal = awayStat?.value ?? 0;
+            const homeNum = typeof homeVal === 'string' ? parseFloat(homeVal) || 0 : homeVal;
+            const awayNum = typeof awayVal === 'string' ? parseFloat(awayVal) || 0 : awayVal;
+            const total = homeNum + awayNum || 1;
+
+            return (
+              <div key={stat.type} style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, marginBottom: 4 }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', width: 40, textAlign: 'right' }}>{homeVal}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1, textAlign: 'center' }}>{stat.type}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)', width: 40, textAlign: 'left' }}>{awayVal}</span>
+                </div>
+                <div style={{ display: 'flex', gap: 2, height: 4 }}>
+                  <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                    <div style={{ width: `${(homeNum / total) * 100}%`, height: '100%', borderRadius: 2, background: 'var(--accent-green)' }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ width: `${(awayNum / total) * 100}%`, height: '100%', borderRadius: 2, background: 'var(--accent-cyan)' }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </Section>
+      )}
+
+      {/* H2H */}
+      {h2hMatches.length > 0 && (
+        <Section title="Historial (H2H)">
+          {h2hMatches.map((m: any) => {
+            const d = m.fixture?.date ? new Date(m.fixture.date).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '?';
+            return (
+              <div key={m.fixture?.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 0', borderBottom: '1px solid var(--border-subtle)', fontSize: 12 }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--text-muted)', width: 52 }}>{d}</span>
+                <span style={{ flex: 1, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{m.teams?.home?.name}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--text-primary)', padding: '0 6px' }}>{m.goals?.home}-{m.goals?.away}</span>
+                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-secondary)' }}>{m.teams?.away?.name}</span>
+              </div>
+            );
+          })}
+        </Section>
+      )}
+
+      {/* No data */}
+      {stats.length === 0 && events.length === 0 && !matchWinner && !prediction && h2hMatches.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)', fontSize: 13 }}>
+          Los datos detallados aun no estan disponibles para este partido.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-md)', padding: 14, marginBottom: 10 }}>
+      <h2 style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--text-primary)', marginBottom: 12 }}>{title}</h2>
+      {children}
     </div>
   );
 }

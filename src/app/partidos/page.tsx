@@ -26,6 +26,9 @@ export default async function PartidosPage({ searchParams }: PageProps) {
     const fetchParams: any = { date };
     if (validLeagueId) {
       fetchParams.league = validLeagueId;
+      // API-Football requires season when filtering by league
+      const now = new Date();
+      fetchParams.season = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
     }
     const res = await getFixtures(fetchParams);
     fixtures = res.response || [];

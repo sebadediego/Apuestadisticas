@@ -6,6 +6,26 @@ import Banner1Win from '@/components/Banner1Win';
 const AFFILIATE_LINK = 'https://lkpq.cc/b8edf9';
 const TOP_LEAGUE_IDS = [128, 71, 39, 140, 135, 61, 78, 2, 13];
 
+function translateAdvice(advice: string): string {
+  if (!advice) return '';
+  let t = advice;
+  // Common patterns from API-Football predictions
+  t = t.replace(/Combo Double chance/i, 'Doble chance combinada');
+  t = t.replace(/Double chance/i, 'Doble chance');
+  t = t.replace(/or draw/i, 'o empate');
+  t = t.replace(/and target/i, 'y objetivo');
+  t = t.replace(/ goals/i, ' goles');
+  t = t.replace(/ goal/i, ' gol');
+  t = t.replace(/Winner/i, 'Ganador');
+  t = t.replace(/ win /i, ' gana ');
+  t = t.replace(/ draw /i, ' empate ');
+  t = t.replace(/ or /ig, ' o ');
+  t = t.replace(/ and /ig, ' y ');
+  t = t.replace(/Over/g, 'Mas de');
+  t = t.replace(/Under/g, 'Menos de');
+  return t;
+}
+
 interface PredictionData { fixture: any; prediction: any; }
 
 export default function PrediccionesPage() {
@@ -159,7 +179,7 @@ export default function PrediccionesPage() {
 
             {/* Advice */}
             {pred?.advice && (
-              <div className="pred-advice">{pred.advice}</div>
+              <div className="pred-advice">{translateAdvice(pred.advice)}</div>
             )}
 
             {/* Bet button — CAMBIO 6 */}

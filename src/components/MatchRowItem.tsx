@@ -112,45 +112,41 @@ export default function MatchRowItem({ fixture, odds }: MatchRowProps) {
           </div>
         </div>
 
-        {/* Odds inline */}
-        <div className="match-odds">
-          <a
-            href={AFFILIATE_LINK}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="odd-pill"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <span className="odd-pill-label">1</span>
-            <span className={`odd-pill-value ${!odds?.home ? 'empty' : ''}`}>
-              {odds?.home || '—'}
-            </span>
-          </a>
-          <a
-            href={AFFILIATE_LINK}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="odd-pill"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <span className="odd-pill-label">X</span>
-            <span className={`odd-pill-value ${!odds?.draw ? 'empty' : ''}`}>
-              {odds?.draw || '—'}
-            </span>
-          </a>
-          <a
-            href={AFFILIATE_LINK}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="odd-pill"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <span className="odd-pill-label">2</span>
-            <span className={`odd-pill-value ${!odds?.away ? 'empty' : ''}`}>
-              {odds?.away || '—'}
-            </span>
-          </a>
-        </div>
+        {/* Odds inline — only show if we have odds data AND match is not finished */}
+        {odds?.home && !isFt && (
+          <div className="match-odds">
+            <a
+              href={AFFILIATE_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="odd-pill"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="odd-pill-label">1</span>
+              <span className="odd-pill-value">{odds.home}</span>
+            </a>
+            <a
+              href={AFFILIATE_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="odd-pill"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="odd-pill-label">X</span>
+              <span className="odd-pill-value" style={{ color: 'var(--accent-amber)' }}>{odds.draw || '—'}</span>
+            </a>
+            <a
+              href={AFFILIATE_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="odd-pill"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="odd-pill-label">2</span>
+              <span className="odd-pill-value">{odds.away || '—'}</span>
+            </a>
+          </div>
+        )}
       </div>
     </Link>
   );

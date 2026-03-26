@@ -979,10 +979,13 @@ body {
 .chat-container {
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - var(--bottom-bar-height) - 4px);
+  height: calc(100dvh - var(--bottom-bar-height) - 8px);
+  width: 100%;
   max-width: 720px;
   margin: 0 auto;
   position: relative;
+  background: var(--bg-primary);
+  overflow: hidden;
 }
 
 .chat-header {
@@ -991,6 +994,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .chat-header-avatar {
@@ -1072,6 +1076,7 @@ body {
   padding: 8px 16px;
   overflow-x: auto;
   scrollbar-width: none;
+  flex-shrink: 0;
 }
 
 .chat-suggestions::-webkit-scrollbar { display: none; }
@@ -1106,6 +1111,7 @@ body {
   padding: 12px 16px;
   border-top: 1px solid var(--border-subtle);
   background: var(--bg-primary);
+  flex-shrink: 0;
 }
 
 .chat-input {
@@ -1151,6 +1157,7 @@ body {
   color: var(--text-muted);
   text-align: center;
   padding: 6px 16px 10px;
+  flex-shrink: 0;
 }
 
 /* ============================================
