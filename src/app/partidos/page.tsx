@@ -53,7 +53,7 @@ export default async function PartidosPage({ searchParams }: PageProps) {
     )
     .map(([id, data]) => ({ id: Number(id), ...data }));
 
-  // BUG 2 FIX: Fetch odds by date
+  // Fetch odds — batch by date + individual fallback for top leagues
   let oddsMap: Record<number, { home: string | null; draw: string | null; away: string | null }> = {};
   try {
     const oddsRaw = await getOdds({ date });
@@ -75,8 +75,34 @@ export default async function PartidosPage({ searchParams }: PageProps) {
         }
       }
     }
-  } catch (e) {
-    console.error('Error fetching odds:', e);
+  } catch {}
+
+  // Individual odds for NS fixtures in top leagues that don't have odds yet
+  const { TOP_LEAGUE_IDS } = await import('@/lib/api-football');
+  const missingOddsFixtures = fixtures
+    .filter((f: any) => {
+      const fid = f.fixture?.id;
+      const lid = f.league?.id;
+      return fid && TOP_LEAGUE_IDS.includes(lid) && !oddsMap[fid] && f.fixture?.status?.short === 'NS';
+    })
+    .slice(0, 6);
+
+  for (const fix of missingOddsFixtures) {
+    try {
+      const o = await getOdds({ fixture: fix.fixture.id });
+      const arr = o.response || [];
+      if (arr.length > 0) {
+        const bk = arr[0]?.bookmakers?.[0];
+        const market = bk?.bets?.find((b: any) => b.id === 1 || b.name === 'Match Winner');
+        if (market) {
+          oddsMap[fix.fixture.id] = {
+            home: market.values?.find((v: any) => v.value === 'Home')?.odd || null,
+            draw: market.values?.find((v: any) => v.value === 'Draw')?.odd || null,
+            away: market.values?.find((v: any) => v.value === 'Away')?.odd || null,
+          };
+        }
+      }
+    } catch {}
   }
 
   return (

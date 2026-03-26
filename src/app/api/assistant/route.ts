@@ -6,7 +6,7 @@ import {
 } from '@/lib/api-football';
 import {
   processFixtureForContext, processOddsForContext,
-  processPredictionForContext
+  processPredictionForContext, processH2HForContext
 } from '@/lib/data-processor';
 
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
@@ -19,7 +19,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing message' }, { status: 400 });
     }
 
-    const context = await gatherContext(message);
+    // Gather all relevant data
+    const { context, matchData } = await gatherContext(message);
     const systemPrompt = buildSystemPrompt();
 
     const messages = [
@@ -30,29 +31,35 @@ export async function POST(request: NextRequest) {
       }
     ];
 
+    // Try Claude API first
     if (ANTHROPIC_KEY) {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': ANTHROPIC_KEY,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1500,
-          system: systemPrompt,
-          messages,
-        }),
-      });
+      try {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': ANTHROPIC_KEY,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-4-20250514',
+            max_tokens: 1500,
+            system: systemPrompt,
+            messages,
+          }),
+        });
 
-      const data = await response.json();
-      const text = data.content?.map((c: any) => c.text || '').join('') || 'No pude generar una respuesta.';
-      return NextResponse.json({ response: text, context });
+        const data = await response.json();
+        const text = data.content?.map((c: any) => c.text || '').join('') || '';
+        if (text) {
+          return NextResponse.json({ response: text });
+        }
+      } catch {}
     }
 
-    const analysis = generateLocalAnalysis(message, context);
-    return NextResponse.json({ response: analysis, context });
+    // Fallback: Generate a proper analytical report locally
+    const analysis = generateAnalyticalReport(message, matchData);
+    return NextResponse.json({ response: analysis });
 
   } catch (error: any) {
     console.error('Assistant error:', error);
@@ -63,148 +70,355 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// CAMBIO 9: System prompt mejorado — sin emojis literales, enfocado en futbol/apuestas
 function buildSystemPrompt(): string {
   return [
     'Sos "Apuestadisticas Bot", un analista deportivo experto especializado en futbol y apuestas.',
     '',
     'REGLAS:',
     '- SOLO respondas sobre futbol, apuestas, cuotas, predicciones y partidos.',
-    '- Si te preguntan sobre CUALQUIER otro tema (politica, musica, cocina, etc.), responde: "Solo puedo ayudarte con partidos, cuotas y predicciones deportivas."',
+    '- Si te preguntan sobre CUALQUIER otro tema, responde: "Solo puedo ayudarte con partidos, cuotas y predicciones deportivas."',
     '- SOLO basate en los datos reales proporcionados entre las etiquetas DATOS REALES.',
     '- NUNCA inventes estadisticas, resultados, cuotas o datos que no esten en el contexto.',
-    '- Si un dato no esta disponible, deci "dato no disponible".',
-    '- NUNCA prometas resultados ni asegures que algo va a pasar.',
     '',
     'CUANDO TE PREGUNTEN POR UN PARTIDO ESPECIFICO:',
-    '- Busca ESE partido en los datos proporcionados.',
-    '- Da una recomendacion razonada sobre ese partido, analizando cuotas, forma, etc.',
-    '- NO listes todos los partidos del dia. Solo habla del partido que preguntaron.',
-    '- Si no encontras el partido en los datos, deci que no tenes datos para ese partido.',
+    '- Busca ESE partido en los datos.',
+    '- Genera un INFORME DETALLADO con secciones: Analisis del partido, Cuotas disponibles, Mercados recomendados, Prediccion.',
+    '- Analiza las cuotas y di cuales tienen valor.',
+    '- NO listes todos los partidos. Solo habla del partido consultado.',
     '',
     'FORMATO:',
-    '- Responde en espanol argentino, tono profesional pero cercano.',
-    '- Usa parrafos cortos.',
-    '- Destaca datos clave con **negritas**.',
-    '- Al final de cada recomendacion, sugeri: "Podes apostar en 1Win con las mejores cuotas."',
-    '- Siempre agrega: "Las apuestas implican riesgo. Aposta responsablemente."',
+    '- Responde en espanol argentino.',
+    '- Usa parrafos cortos con **negritas** para datos clave.',
+    '- Al final sugeri: "Podes apostar en 1Win con las mejores cuotas."',
+    '- Siempre: "Las apuestas implican riesgo. Aposta responsablemente."',
     '- NO uses emojis.',
-    '- Se conciso pero completo.',
+    '- Se detallado y analitico.',
   ].join('\n');
 }
 
-async function gatherContext(message: string): Promise<string> {
+interface MatchAnalysis {
+  fixture: any;
+  odds: any;
+  prediction: any;
+  h2h: any[];
+  type: 'specific' | 'live' | 'general' | 'recommendations';
+}
+
+async function gatherContext(message: string): Promise<{ context: string; matchData: MatchAnalysis | null }> {
   const lowerMsg = message.toLowerCase();
   const contextParts: string[] = [];
+  let matchData: MatchAnalysis | null = null;
 
   try {
-    // Check if asking about a specific team
     const todayRes = await getFixturesToday();
     const todayFixtures = todayRes.response || [];
 
-    // Try to find a specific match mentioned
-    const specificMatch = todayFixtures.find((f: any) => {
-      const homeName = (f.teams?.home?.name || '').toLowerCase();
-      const awayName = (f.teams?.away?.name || '').toLowerCase();
-      return lowerMsg.includes(homeName.split(' ')[0]) || lowerMsg.includes(awayName.split(' ')[0]);
-    });
+    // Try to find a specific team/match mentioned
+    const specificMatch = findSpecificMatch(lowerMsg, todayFixtures);
 
     if (specificMatch) {
-      // User asked about a specific match — focus on that match only
       const fid = specificMatch.fixture?.id;
       contextParts.push('=== PARTIDO CONSULTADO ===');
       contextParts.push(processFixtureForContext(specificMatch));
 
-      // Get odds for this specific match
+      let oddsRaw: any = null;
+      let predRaw: any = null;
+      let h2hRaw: any[] = [];
+
+      // Fetch odds
       try {
-        const odds = await getOdds({ fixture: fid });
-        if (odds.response?.length) {
+        const o = await getOdds({ fixture: fid });
+        if (o.response?.length) {
+          oddsRaw = o.response[0];
           contextParts.push('\n=== CUOTAS ===');
-          contextParts.push(processOddsForContext(odds.response[0]));
+          contextParts.push(processOddsForContext(o.response[0]));
         }
       } catch {}
 
-      // Get prediction for this specific match
+      // Fetch prediction
       try {
-        const pred = await getPredictions(fid);
-        if (pred.response?.length) {
+        const p = await getPredictions(fid);
+        if (p.response?.length) {
+          predRaw = p.response[0];
           contextParts.push('\n=== PREDICCION ===');
-          contextParts.push(processPredictionForContext(pred.response[0]));
+          contextParts.push(processPredictionForContext(p.response[0]));
         }
       } catch {}
-    } else if (lowerMsg.includes('vivo') || lowerMsg.includes('live') || lowerMsg.includes('ahora') || lowerMsg.includes('jugando')) {
-      // Live matches
+
+      // Fetch H2H
+      const homeId = specificMatch.teams?.home?.id;
+      const awayId = specificMatch.teams?.away?.id;
+      if (homeId && awayId) {
+        try {
+          const h = await getHeadToHead({ h2h: `${homeId}-${awayId}`, last: 5 });
+          h2hRaw = h.response || [];
+          if (h2hRaw.length > 0) {
+            contextParts.push('\n=== HISTORIAL ===');
+            contextParts.push(processH2HForContext(h2hRaw));
+          }
+        } catch {}
+      }
+
+      matchData = { fixture: specificMatch, odds: oddsRaw, prediction: predRaw, h2h: h2hRaw, type: 'specific' };
+
+    } else if (lowerMsg.includes('vivo') || lowerMsg.includes('live') || lowerMsg.includes('ahora')) {
       const live = await getLiveFixtures();
       if (live.response?.length) {
         contextParts.push('=== PARTIDOS EN VIVO ===');
-        live.response.slice(0, 10).forEach((f: any) => {
+        live.response.slice(0, 8).forEach((f: any) => {
           contextParts.push(processFixtureForContext(f));
         });
+        matchData = { fixture: null, odds: null, prediction: null, h2h: [], type: 'live' };
       } else {
         contextParts.push('No hay partidos en vivo en este momento.');
       }
-    } else if (lowerMsg.includes('cuota') || lowerMsg.includes('odd') || lowerMsg.includes('apuesta') || lowerMsg.includes('recomend') || lowerMsg.includes('pick') || lowerMsg.includes('mejor')) {
-      // Odds / recommendations — show top upcoming with odds
-      const upcoming = todayFixtures
-        .filter((f: any) => f.fixture?.status?.short === 'NS')
-        .slice(0, 5);
 
-      if (upcoming.length > 0) {
-        contextParts.push('=== PROXIMOS PARTIDOS CON CUOTAS ===');
-        for (const f of upcoming) {
-          contextParts.push(processFixtureForContext(f));
-          try {
-            const odds = await getOdds({ fixture: f.fixture.id });
-            if (odds.response?.length) {
-              contextParts.push(processOddsForContext(odds.response[0]));
-            }
-          } catch {}
-        }
-      } else {
-        contextParts.push('No hay partidos proximos con cuotas disponibles.');
+    } else if (lowerMsg.includes('recomend') || lowerMsg.includes('pick') || lowerMsg.includes('mejor') || lowerMsg.includes('apostar')) {
+      // Get upcoming matches with odds for recommendations
+      const upcoming = todayFixtures.filter((f: any) => f.fixture?.status?.short === 'NS').slice(0, 5);
+      contextParts.push('=== PARTIDOS DISPONIBLES PARA APUESTAS ===');
+
+      for (const f of upcoming) {
+        contextParts.push(processFixtureForContext(f));
+        try {
+          const o = await getOdds({ fixture: f.fixture.id });
+          if (o.response?.length) {
+            contextParts.push(processOddsForContext(o.response[0]));
+          }
+        } catch {}
+        try {
+          const p = await getPredictions(f.fixture.id);
+          if (p.response?.length) {
+            contextParts.push('Prediccion: ' + (p.response[0]?.predictions?.advice || 'N/D'));
+          }
+        } catch {}
+        contextParts.push('---');
       }
+      matchData = { fixture: null, odds: null, prediction: null, h2h: [], type: 'recommendations' };
+
     } else {
-      // General: show today overview (compact)
-      if (todayFixtures.length > 0) {
-        contextParts.push('=== PARTIDOS DE HOY ===');
-        todayFixtures.slice(0, 12).forEach((f: any) => {
-          contextParts.push(processFixtureForContext(f));
-        });
-      } else {
-        contextParts.push('No hay partidos programados para hoy.');
-      }
+      // General overview
+      contextParts.push('=== PARTIDOS DE HOY ===');
+      todayFixtures.slice(0, 10).forEach((f: any) => {
+        contextParts.push(processFixtureForContext(f));
+      });
+      matchData = { fixture: null, odds: null, prediction: null, h2h: [], type: 'general' };
     }
   } catch (error: any) {
     contextParts.push('Error obteniendo datos: ' + error.message);
   }
 
-  return contextParts.join('\n');
+  return { context: contextParts.join('\n'), matchData };
 }
 
-function generateLocalAnalysis(message: string, context: string): string {
-  const lines = context.split('\n').filter(l => l.trim());
-  const matchCount = lines.filter(l => l.startsWith('Partido:')).length;
+function findSpecificMatch(query: string, fixtures: any[]): any | null {
+  // Normalize query
+  const q = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
-  let response = '**Apuestadisticas Bot**\n\n';
+  // Common team name mappings
+  const aliases: Record<string, string[]> = {
+    'boca': ['boca juniors', 'boca jrs'],
+    'river': ['river plate'],
+    'san lorenzo': ['san lorenzo'],
+    'racing': ['racing club', 'racing'],
+    'independiente': ['independiente'],
+    'huracan': ['huracan'],
+    'velez': ['velez sarsfield', 'velez'],
+    'lanus': ['lanus'],
+    'argentinos': ['argentinos juniors', 'argentinos jrs'],
+    'banfield': ['banfield'],
+    'defensa': ['defensa y justicia'],
+    'talleres': ['talleres'],
+    'belgrano': ['belgrano'],
+    'colon': ['colon'],
+    'union': ['union'],
+    'estudiantes': ['estudiantes'],
+    'newells': ['newell', 'newells'],
+    'rosario': ['rosario central'],
+    'godoy': ['godoy cruz'],
+    'barcelona': ['barcelona', 'barca'],
+    'real madrid': ['real madrid'],
+    'atletico': ['atletico madrid', 'atletico'],
+    'liverpool': ['liverpool'],
+    'manchester': ['manchester united', 'manchester city', 'man utd', 'man city'],
+    'chelsea': ['chelsea'],
+    'arsenal': ['arsenal'],
+    'juventus': ['juventus', 'juve'],
+    'milan': ['ac milan', 'inter milan', 'milan'],
+    'psg': ['paris saint-germain', 'psg'],
+    'bayern': ['bayern munich', 'bayern'],
+    'dortmund': ['borussia dortmund', 'dortmund'],
+    'flamengo': ['flamengo'],
+    'palmeiras': ['palmeiras'],
+    'corinthians': ['corinthians'],
+  };
 
-  if (matchCount === 0) {
-    response += 'No encontre datos disponibles para tu consulta. ';
-    response += 'Podes intentar mas tarde o preguntar por algo especifico como:\n';
-    response += '- "Que partidos hay hoy?"\n';
-    response += '- "Cuales son las cuotas para los partidos de hoy?"\n';
-    response += '- "Hay partidos en vivo?"';
-    return response;
+  for (const fix of fixtures) {
+    const homeName = (fix.teams?.home?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const awayName = (fix.teams?.away?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+    // Direct name match (partial)
+    const homeWords = homeName.split(/\s+/);
+    const awayWords = awayName.split(/\s+/);
+
+    for (const word of homeWords) {
+      if (word.length >= 4 && q.includes(word)) return fix;
+    }
+    for (const word of awayWords) {
+      if (word.length >= 4 && q.includes(word)) return fix;
+    }
+
+    // Alias match
+    for (const [alias, fullNames] of Object.entries(aliases)) {
+      if (q.includes(alias)) {
+        for (const fn of fullNames) {
+          if (homeName.includes(fn) || awayName.includes(fn)) return fix;
+        }
+        // Also check partial
+        if (homeName.includes(alias) || awayName.includes(alias)) return fix;
+      }
+    }
   }
 
-  response += 'Encontre **' + matchCount + ' partido(s)** relevantes para tu consulta.\n\n';
-  response += context.split('\n').slice(0, 15).map(l => {
-    if (l.startsWith('===')) return '\n**' + l.replace(/===/g, '').trim() + '**';
-    if (l.startsWith('Partido:')) return '- ' + l;
-    return l;
-  }).join('\n');
+  return null;
+}
 
-  response += '\n\nPodes apostar en 1Win con las mejores cuotas.';
-  response += '\n\nLas apuestas implican riesgo. Aposta responsablemente.';
+function generateAnalyticalReport(message: string, matchData: MatchAnalysis | null): string {
+  if (!matchData) {
+    return 'No encontre datos disponibles para tu consulta.\n\nPodes preguntarme por:\n- Un partido especifico ("Que apostar en Argentinos vs Lanus")\n- Recomendaciones del dia ("Que recomendas para hoy")\n- Partidos en vivo ("Hay partidos en vivo")\n\nPodes apostar en 1Win con las mejores cuotas.\n\nLas apuestas implican riesgo. Aposta responsablemente.';
+  }
 
-  return response;
+  // SPECIFIC MATCH ANALYSIS
+  if (matchData.type === 'specific' && matchData.fixture) {
+    const fix = matchData.fixture;
+    const home = fix.teams?.home?.name || 'Local';
+    const away = fix.teams?.away?.name || 'Visitante';
+    const league = fix.league?.name || '';
+    const time = fix.fixture?.date
+      ? new Date(fix.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
+      : '';
+
+    let report = `**INFORME: ${home} vs ${away}**\n`;
+    report += `${league} | ${time}hs\n\n`;
+
+    // Prediction section
+    const pred = matchData.prediction?.predictions;
+    if (pred) {
+      report += '**Analisis del partido**\n';
+      if (pred.winner?.name) {
+        report += `El favorito segun los datos es **${pred.winner.name}**.\n`;
+      }
+      if (pred.percent) {
+        report += `Probabilidades: Local ${pred.percent.home} | Empate ${pred.percent.draw} | Visitante ${pred.percent.away}\n`;
+      }
+      if (pred.advice) {
+        report += `Consejo de la API: ${pred.advice}\n`;
+      }
+      report += '\n';
+
+      // Team form
+      const homeTeam = matchData.prediction?.teams?.home;
+      const awayTeam = matchData.prediction?.teams?.away;
+      if (homeTeam?.league?.form || awayTeam?.league?.form) {
+        report += '**Forma reciente**\n';
+        if (homeTeam?.league?.form) {
+          report += `${home}: ${homeTeam.league.form.slice(-5).split('').join('-')}\n`;
+        }
+        if (awayTeam?.league?.form) {
+          report += `${away}: ${awayTeam.league.form.slice(-5).split('').join('-')}\n`;
+        }
+        report += '\n';
+      }
+
+      // Goals analysis
+      if (homeTeam?.league?.goals || awayTeam?.league?.goals) {
+        report += '**Goles (promedio por partido)**\n';
+        if (homeTeam?.league?.goals) {
+          report += `${home}: ${homeTeam.league.goals.for?.average?.total || 'N/D'} a favor, ${homeTeam.league.goals.against?.average?.total || 'N/D'} en contra\n`;
+        }
+        if (awayTeam?.league?.goals) {
+          report += `${away}: ${awayTeam.league.goals.for?.average?.total || 'N/D'} a favor, ${awayTeam.league.goals.against?.average?.total || 'N/D'} en contra\n`;
+        }
+        report += '\n';
+      }
+    }
+
+    // Odds section
+    const odds = matchData.odds;
+    if (odds?.bookmakers?.length) {
+      const bk = odds.bookmakers[0];
+      report += '**Cuotas disponibles**\n';
+      report += `Fuente: ${bk.name}\n`;
+
+      for (const bet of (bk.bets || []).slice(0, 5)) {
+        const vals = (bet.values || []).map((v: any) => `${v.value}: ${v.odd}`).join(' | ');
+        report += `${bet.name}: ${vals}\n`;
+      }
+      report += '\n';
+
+      // Value analysis
+      const mw = bk.bets?.find((b: any) => b.name === 'Match Winner');
+      const ou = bk.bets?.find((b: any) => b.name === 'Goals Over/Under');
+      const btts = bk.bets?.find((b: any) => b.name === 'Both Teams Score');
+
+      report += '**Mercados recomendados**\n';
+      if (mw && pred?.winner?.name) {
+        const winnerOdd = mw.values?.find((v: any) => {
+          if (pred.winner.name === home && v.value === 'Home') return true;
+          if (pred.winner.name === away && v.value === 'Away') return true;
+          return false;
+        });
+        if (winnerOdd) {
+          report += `- Ganador (${pred.winner.name}) a cuota **${winnerOdd.odd}**\n`;
+        }
+      }
+      if (ou) {
+        const over25 = ou.values?.find((v: any) => v.value === 'Over 2.5');
+        const under25 = ou.values?.find((v: any) => v.value === 'Under 2.5');
+        if (over25) report += `- Over 2.5 goles a cuota **${over25.odd}**\n`;
+        if (under25) report += `- Under 2.5 goles a cuota **${under25.odd}**\n`;
+      }
+      if (btts) {
+        const yes = btts.values?.find((v: any) => v.value === 'Yes');
+        if (yes) report += `- Ambos marcan: Si a cuota **${yes.odd}**\n`;
+      }
+      report += '\n';
+    } else {
+      report += '**Cuotas**: No hay cuotas disponibles para este partido en este momento.\n\n';
+    }
+
+    // H2H section
+    if (matchData.h2h.length > 0) {
+      report += '**Historial directo (ultimos enfrentamientos)**\n';
+      let homeWins = 0, awayWins = 0, draws = 0;
+      for (const m of matchData.h2h.slice(0, 5)) {
+        const hg = m.goals?.home ?? 0;
+        const ag = m.goals?.away ?? 0;
+        const hName = m.teams?.home?.name || '';
+        const aName = m.teams?.away?.name || '';
+        const d = m.fixture?.date ? new Date(m.fixture.date).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
+        report += `${d}: ${hName} ${hg}-${ag} ${aName}\n`;
+        if (hg > ag) {
+          if (hName.includes(home.split(' ')[0])) homeWins++; else awayWins++;
+        } else if (ag > hg) {
+          if (aName.includes(away.split(' ')[0])) awayWins++; else homeWins++;
+        } else {
+          draws++;
+        }
+      }
+      report += `Resumen: ${home.split(' ')[0]} ${homeWins}G | ${draws}E | ${away.split(' ')[0]} ${awayWins}G\n\n`;
+    }
+
+    report += 'Podes apostar en 1Win con las mejores cuotas.\n\n';
+    report += 'Las apuestas implican riesgo. Aposta responsablemente.';
+    return report;
+  }
+
+  // LIVE MATCHES
+  if (matchData.type === 'live') {
+    return 'Consulta la pestana "En Vivo" para ver todos los partidos en curso con scores actualizados cada 30 segundos.\n\nPodes apostar en 1Win con las mejores cuotas.\n\nLas apuestas implican riesgo. Aposta responsablemente.';
+  }
+
+  // GENERAL / RECOMMENDATIONS - already handled by context passing
+  return 'Encontre partidos para hoy. Para un informe detallado, preguntame por un partido especifico, por ejemplo:\n\n- "Que apostar en Argentinos vs Lanus"\n- "Analisis de Barcelona vs Real Madrid"\n- "Recomendacion para el partido de River"\n\nPodes apostar en 1Win con las mejores cuotas.\n\nLas apuestas implican riesgo. Aposta responsablemente.';
 }
