@@ -9,6 +9,7 @@ import {
   processPredictionForContext, processH2HForContext
 } from '@/lib/data-processor';
 
+const GROQ_KEY = process.env.GROQ_API_KEY || '';
 const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || '';
 
@@ -21,24 +22,31 @@ export async function POST(request: NextRequest) {
 
     const { context, matchData } = await gatherContext(message);
     const systemPrompt = buildSystemPrompt();
+    const userMsg = message + '\n\n--- DATOS REALES (API-Football) ---\n' + context + '\n--- FIN DATOS ---';
 
-    // Try Gemini first (free), then Anthropic, then local fallback
     let aiResponse = '';
 
-    if (GEMINI_KEY) {
-      console.log('[Assistant] Using Gemini API');
-      aiResponse = await callGemini(systemPrompt, message, context, conversationHistory);
-      if (!aiResponse) console.log('[Assistant] Gemini returned empty response');
-    } else {
-      console.log('[Assistant] No GEMINI_API_KEY found');
+    // 1. Try Groq (free, fast)
+    if (!aiResponse && GROQ_KEY) {
+      console.log('[Assistant] Trying Groq...');
+      aiResponse = await callGroq(systemPrompt, userMsg, conversationHistory);
     }
 
+    // 2. Try Gemini
+    if (!aiResponse && GEMINI_KEY) {
+      console.log('[Assistant] Trying Gemini...');
+      aiResponse = await callGemini(systemPrompt, userMsg, conversationHistory);
+    }
+
+    // 3. Try Anthropic
     if (!aiResponse && ANTHROPIC_KEY) {
-      console.log('[Assistant] Using Anthropic API');
-      aiResponse = await callAnthropic(systemPrompt, message, context, conversationHistory);
+      console.log('[Assistant] Trying Anthropic...');
+      aiResponse = await callAnthropic(systemPrompt, userMsg, conversationHistory);
     }
 
+    // 4. Local fallback
     if (!aiResponse) {
+      console.log('[Assistant] Using local fallback');
       aiResponse = generateReport(matchData);
     }
 
@@ -49,61 +57,70 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// ==================== GROQ (FREE) ====================
+async function callGroq(system: string, userMsg: string, history: any[]): Promise<string> {
+  try {
+    const messages: any[] = [
+      { role: 'system', content: system },
+      ...(history || []).slice(-8).map((m: any) => ({ role: m.role, content: m.content })),
+      { role: 'user', content: userMsg },
+    ];
+
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${GROQ_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages,
+        max_tokens: 2000,
+        temperature: 0.7,
+      }),
+    });
+
+    const data = await res.json();
+    if (data.error) {
+      console.error('[Groq Error]', JSON.stringify(data.error));
+      return '';
+    }
+    const text = data.choices?.[0]?.message?.content || '';
+    if (text) console.log('[Assistant] Groq responded OK');
+    return text;
+  } catch (e: any) {
+    console.error('[Groq Exception]', e.message);
+    return '';
+  }
+}
+
 // ==================== GEMINI ====================
-async function callGemini(system: string, message: string, context: string, history: any[]): Promise<string> {
+async function callGemini(system: string, userMsg: string, history: any[]): Promise<string> {
   try {
     const contents: any[] = [];
-
-    // Add conversation history
     for (const msg of (history || []).slice(-8)) {
       contents.push({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content }],
       });
     }
+    contents.push({ role: 'user', parts: [{ text: userMsg }] });
 
-    // Add current message with context
-    contents.push({
-      role: 'user',
-      parts: [{ text: message + '\n\n--- DATOS REALES (API-Football) ---\n' + context + '\n--- FIN DATOS ---' }],
-    });
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`;
-
-    const body = {
-      contents,
-      systemInstruction: { parts: [{ text: system }] },
-      generationConfig: {
-        maxOutputTokens: 2000,
-        temperature: 0.7,
-      },
-    };
-
-    console.log('[Gemini] Calling API...');
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          systemInstruction: { parts: [{ text: system }] },
+          generationConfig: { maxOutputTokens: 2000, temperature: 0.7 },
+        }),
+      }
+    );
     const data = await res.json();
-
-    // Log errors for debugging
-    if (data.error) {
-      console.error('[Gemini Error]', JSON.stringify(data.error));
-      return '';
-    }
-
-    if (!data.candidates || data.candidates.length === 0) {
-      console.error('[Gemini] No candidates in response:', JSON.stringify(data).slice(0, 500));
-      return '';
-    }
-
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    if (text) {
-      console.log('[Assistant] Gemini responded successfully');
-    }
-    return text;
+    if (data.error) { console.error('[Gemini Error]', JSON.stringify(data.error)); return ''; }
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
   } catch (e: any) {
     console.error('[Gemini Exception]', e.message);
     return '';
@@ -111,16 +128,12 @@ async function callGemini(system: string, message: string, context: string, hist
 }
 
 // ==================== ANTHROPIC ====================
-async function callAnthropic(system: string, message: string, context: string, history: any[]): Promise<string> {
+async function callAnthropic(system: string, userMsg: string, history: any[]): Promise<string> {
   try {
     const messages = [
       ...(history || []).slice(-8),
-      {
-        role: 'user',
-        content: message + '\n\n--- DATOS REALES (API-Football) ---\n' + context + '\n--- FIN DATOS ---',
-      },
+      { role: 'user', content: userMsg },
     ];
-
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -128,18 +141,12 @@ async function callAnthropic(system: string, message: string, context: string, h
         'x-api-key': ANTHROPIC_KEY,
         'anthropic-version': '2023-06-01',
       },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        system,
-        messages,
-      }),
+      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 2000, system, messages }),
     });
-
     const data = await res.json();
     return data.content?.map((c: any) => c.text || '').join('') || '';
-  } catch (e) {
-    console.error('Anthropic error:', e);
+  } catch (e: any) {
+    console.error('[Anthropic Exception]', e.message);
     return '';
   }
 }
@@ -151,57 +158,42 @@ function buildSystemPrompt(): string {
     '',
     'REGLAS ESTRICTAS:',
     '- SOLO respondas sobre futbol, apuestas, cuotas, predicciones y partidos.',
-    '- Si preguntan CUALQUIER otro tema (politica, musica, cocina, etc.), responde exactamente: "Solo puedo ayudarte con partidos, cuotas y predicciones deportivas."',
-    '- Basate UNICAMENTE en los datos reales proporcionados entre las etiquetas "DATOS REALES".',
-    '- NUNCA inventes estadisticas, resultados, cuotas o datos que no esten en el contexto.',
-    '- Si no tenes datos de algo, deci "no tengo datos disponibles para eso".',
+    '- Si preguntan CUALQUIER otro tema, responde: "Solo puedo ayudarte con partidos, cuotas y predicciones deportivas."',
+    '- Basate UNICAMENTE en los datos reales entre "DATOS REALES".',
+    '- NUNCA inventes datos. Si no tenes info, decilo.',
     '',
-    'CUANDO TE PREGUNTEN POR UN PARTIDO ESPECIFICO:',
-    '- Genera un INFORME ANALITICO DETALLADO.',
-    '- Incluye secciones: Analisis General, Cuotas Disponibles, Mercados Recomendados, Prediccion Final.',
-    '- Analiza las cuotas y explica cuales ofrecen valor.',
-    '- Menciona el historial directo si hay datos.',
-    '- Da una recomendacion concreta de apuesta.',
-    '- NO listes todos los partidos del dia. SOLO habla del partido consultado.',
+    'PARA PARTIDOS ESPECIFICOS:',
+    '- Genera un INFORME ANALITICO DETALLADO con: Analisis General, Cuotas, Mercados Recomendados, Prediccion Final.',
+    '- Analiza cuotas y explica cuales ofrecen valor.',
+    '- Da recomendacion concreta de apuesta.',
+    '- NO listes todos los partidos, SOLO el consultado.',
     '',
-    'CUANDO PREGUNTEN "QUE APOSTAR" SIN ESPECIFICAR PARTIDO:',
-    '- Muestra los partidos disponibles para esa fecha.',
-    '- Agrupa por liga.',
-    '- Sugeri que pregunten por un partido especifico para el informe completo.',
+    'SIN PARTIDO ESPECIFICO:',
+    '- Lista partidos disponibles agrupados por liga.',
+    '- Sugeri preguntar por uno especifico.',
     '',
-    'FORMATO DE RESPUESTA:',
-    '- Responde en espanol argentino (vos, sos, podes, etc.).',
-    '- Usa parrafos cortos y claros.',
-    '- Usa **negritas** para datos clave (cuotas, porcentajes, nombres de equipos).',
+    'FORMATO:',
+    '- Espanol argentino (vos, sos, podes).',
+    '- Parrafos cortos, **negritas** en datos clave.',
     '- NO uses emojis.',
-    '- Se detallado y analitico, como un analista profesional de apuestas.',
-    '- Al final de cada recomendacion, agrega: "Podes apostar en 1Win con las mejores cuotas."',
-    '- Siempre termina con: "Las apuestas implican riesgo. Aposta responsablemente."',
+    '- Se detallado como analista profesional.',
+    '- Al final: "Podes apostar en 1Win con las mejores cuotas."',
+    '- Siempre: "Las apuestas implican riesgo. Aposta responsablemente."',
   ].join('\n');
 }
 
-// ==================== CONTEXT GATHERING ====================
+// ==================== CONTEXT ====================
 interface MatchData {
-  fixture: any;
-  odds: any;
-  prediction: any;
-  h2h: any[];
-  allFixtures: any[];
-  type: 'specific' | 'live' | 'general';
-  dateLabel: string;
+  fixture: any; odds: any; prediction: any; h2h: any[];
+  allFixtures: any[]; type: 'specific' | 'live' | 'general'; dateLabel: string;
 }
 
 function getDateFromMessage(msg: string): { date: string; label: string } {
   const lower = msg.toLowerCase();
   const today = new Date();
-
   if (lower.includes('manana') || lower.includes('mañana')) {
     const d = new Date(today); d.setDate(d.getDate() + 1);
     return { date: d.toISOString().split('T')[0], label: 'manana' };
-  }
-  if (lower.includes('pasado') && (lower.includes('manana') || lower.includes('mañana'))) {
-    const d = new Date(today); d.setDate(d.getDate() + 2);
-    return { date: d.toISOString().split('T')[0], label: 'pasado manana' };
   }
   if (lower.includes('ayer')) {
     const d = new Date(today); d.setDate(d.getDate() - 1);
@@ -212,14 +204,10 @@ function getDateFromMessage(msg: string): { date: string; label: string } {
 
 function findMatch(query: string, fixtures: any[]): any | null {
   const q = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-
   for (const fix of fixtures) {
-    const homeFull = (fix.teams?.home?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    const awayFull = (fix.teams?.away?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-
-    for (const name of [homeFull, awayFull]) {
-      const words = name.split(/[\s\-]+/);
-      for (const w of words) {
+    for (const side of ['home', 'away']) {
+      const name = (fix.teams?.[side]?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      for (const w of name.split(/[\s\-]+/)) {
         if (w.length >= 3 && q.includes(w)) return fix;
       }
     }
@@ -233,30 +221,23 @@ async function gatherContext(message: string): Promise<{ context: string; matchD
   let matchData: MatchData = { fixture: null, odds: null, prediction: null, h2h: [], allFixtures: [], type: 'general', dateLabel: 'hoy' };
 
   try {
-    // Live check
     if (lowerMsg.includes('vivo') || lowerMsg.includes('live') || lowerMsg.includes('ahora') || lowerMsg.includes('jugando')) {
       const live = await getLiveFixtures();
-      const liveArr = live.response || [];
+      const arr = live.response || [];
       parts.push('=== PARTIDOS EN VIVO ===');
-      if (liveArr.length === 0) {
-        parts.push('No hay partidos en vivo en este momento.');
-      } else {
-        liveArr.slice(0, 10).forEach((f: any) => parts.push(processFixtureForContext(f)));
-      }
-      matchData = { ...matchData, allFixtures: liveArr, type: 'live', dateLabel: 'en vivo' };
+      if (arr.length === 0) parts.push('No hay partidos en vivo.');
+      else arr.slice(0, 10).forEach((f: any) => parts.push(processFixtureForContext(f)));
+      matchData = { ...matchData, allFixtures: arr, type: 'live', dateLabel: 'en vivo' };
       return { context: parts.join('\n'), matchData };
     }
 
-    // Get date
     const { date, label } = getDateFromMessage(message);
     matchData.dateLabel = label;
 
-    // Fetch fixtures
     const res = await getFixtures({ date });
     const fixtures = res.response || [];
     matchData.allFixtures = fixtures;
 
-    // Find specific match
     const specific = findMatch(lowerMsg, fixtures);
 
     if (specific) {
@@ -266,53 +247,24 @@ async function gatherContext(message: string): Promise<{ context: string; matchD
       parts.push('=== PARTIDO CONSULTADO ===');
       parts.push(processFixtureForContext(specific));
 
-      // Odds
-      try {
-        const o = await getOdds({ fixture: fid });
-        if (o.response?.length) {
-          matchData.odds = o.response[0];
-          parts.push('\n=== CUOTAS ===');
-          parts.push(processOddsForContext(o.response[0]));
-        }
-      } catch {}
+      try { const o = await getOdds({ fixture: fid }); if (o.response?.length) { matchData.odds = o.response[0]; parts.push('\n=== CUOTAS ==='); parts.push(processOddsForContext(o.response[0])); } } catch {}
+      try { const p = await getPredictions(fid); if (p.response?.length) { matchData.prediction = p.response[0]; parts.push('\n=== PREDICCION ==='); parts.push(processPredictionForContext(p.response[0])); } } catch {}
 
-      // Prediction
-      try {
-        const p = await getPredictions(fid);
-        if (p.response?.length) {
-          matchData.prediction = p.response[0];
-          parts.push('\n=== PREDICCION ===');
-          parts.push(processPredictionForContext(p.response[0]));
-        }
-      } catch {}
-
-      // H2H
       const hid = specific.teams?.home?.id;
       const aid = specific.teams?.away?.id;
       if (hid && aid) {
-        try {
-          const h = await getHeadToHead({ h2h: `${hid}-${aid}`, last: 5 });
-          matchData.h2h = h.response || [];
-          if (matchData.h2h.length > 0) {
-            parts.push('\n=== HISTORIAL ===');
-            parts.push(processH2HForContext(matchData.h2h));
-          }
-        } catch {}
+        try { const h = await getHeadToHead({ h2h: `${hid}-${aid}`, last: 5 }); matchData.h2h = h.response || []; if (matchData.h2h.length > 0) { parts.push('\n=== HISTORIAL ==='); parts.push(processH2HForContext(matchData.h2h)); } } catch {}
       }
     } else {
-      // General — list fixtures
       parts.push(`=== PARTIDOS PARA ${label.toUpperCase()} (${date}) ===`);
-      if (fixtures.length === 0) {
-        parts.push('No se encontraron partidos para esta fecha.');
-      } else {
-        const ns = fixtures.filter((f: any) => f.fixture?.status?.short === 'NS');
-        const rest = fixtures.filter((f: any) => f.fixture?.status?.short !== 'NS');
-        [...ns.slice(0, 15), ...rest.slice(0, 5)].forEach((f: any) => parts.push(processFixtureForContext(f)));
-        parts.push('\nTotal: ' + fixtures.length + ' partidos.');
+      if (fixtures.length === 0) parts.push('No se encontraron partidos.');
+      else {
+        fixtures.filter((f: any) => f.fixture?.status?.short === 'NS').slice(0, 15).forEach((f: any) => parts.push(processFixtureForContext(f)));
+        parts.push('Total: ' + fixtures.length + ' partidos.');
       }
     }
   } catch (error: any) {
-    parts.push('Error obteniendo datos: ' + error.message);
+    parts.push('Error: ' + error.message);
   }
 
   return { context: parts.join('\n'), matchData };
@@ -321,63 +273,42 @@ async function gatherContext(message: string): Promise<{ context: string; matchD
 // ==================== LOCAL FALLBACK ====================
 function generateReport(data: MatchData): string {
   if (data.type === 'specific' && data.fixture) {
-    const fix = data.fixture;
-    const home = fix.teams?.home?.name || 'Local';
-    const away = fix.teams?.away?.name || 'Visitante';
-    const league = fix.league?.name || '';
-    const time = fix.fixture?.date
-      ? new Date(fix.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
-      : '';
+    const home = data.fixture.teams?.home?.name || 'Local';
+    const away = data.fixture.teams?.away?.name || 'Visitante';
+    const league = data.fixture.league?.name || '';
+    const time = data.fixture.fixture?.date ? new Date(data.fixture.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
 
-    let r = '**INFORME: ' + home + ' vs ' + away + '**\n' + league + ' | ' + time + 'hs\n\n';
-
+    let r = `**INFORME: ${home} vs ${away}**\n${league} | ${time}hs\n\n`;
     const pred = data.prediction?.predictions;
     if (pred) {
-      r += '**Analisis**\n';
-      if (pred.winner?.name) r += 'Favorito: **' + pred.winner.name + '**\n';
-      if (pred.percent) r += 'Probabilidades: Local ' + pred.percent.home + ' | Empate ' + pred.percent.draw + ' | Visitante ' + pred.percent.away + '\n';
-      if (pred.advice) r += 'Consejo: ' + pred.advice + '\n';
-      r += '\n';
+      if (pred.winner?.name) r += `**Favorito:** ${pred.winner.name}\n`;
+      if (pred.percent) r += `Probabilidades: Local ${pred.percent.home} | Empate ${pred.percent.draw} | Visitante ${pred.percent.away}\n`;
+      if (pred.advice) r += `Consejo: ${pred.advice}\n\n`;
     }
-
     const odds = data.odds;
     if (odds?.bookmakers?.length) {
       const bk = odds.bookmakers[0];
-      r += '**Cuotas** (' + bk.name + ')\n';
+      r += `**Cuotas** (${bk.name})\n`;
       for (const bet of (bk.bets || []).slice(0, 4)) {
-        const vals = (bet.values || []).map((v: any) => v.value + ': ' + v.odd).join(' | ');
-        r += bet.name + ': ' + vals + '\n';
+        r += `${bet.name}: ${(bet.values || []).map((v: any) => v.value + ': ' + v.odd).join(' | ')}\n`;
       }
       r += '\n';
     }
-
     if (data.h2h.length > 0) {
       r += '**H2H**\n';
       for (const m of data.h2h.slice(0, 3)) {
         const d = m.fixture?.date ? new Date(m.fixture.date).toLocaleDateString('es-AR') : '';
-        r += d + ': ' + (m.teams?.home?.name || '') + ' ' + (m.goals?.home ?? 0) + '-' + (m.goals?.away ?? 0) + ' ' + (m.teams?.away?.name || '') + '\n';
+        r += `${d}: ${m.teams?.home?.name} ${m.goals?.home}-${m.goals?.away} ${m.teams?.away?.name}\n`;
       }
       r += '\n';
     }
-
     r += 'Podes apostar en 1Win con las mejores cuotas.\n\nLas apuestas implican riesgo. Aposta responsablemente.';
     return r;
   }
 
-  if (data.type === 'live') {
-    if (data.allFixtures.length === 0) return 'No hay partidos en vivo en este momento.';
-    let r = '**' + data.allFixtures.length + ' partidos en vivo**\n\n';
-    for (const f of data.allFixtures.slice(0, 8)) {
-      r += '**' + (f.teams?.home?.name || '?') + '** ' + (f.goals?.home ?? 0) + '-' + (f.goals?.away ?? 0) + ' **' + (f.teams?.away?.name || '?') + '** (' + (f.fixture?.status?.elapsed || '?') + "')\n";
-    }
-    return r;
-  }
+  if (data.allFixtures.length === 0) return 'No encontre partidos para ' + data.dateLabel + '.';
 
-  if (data.allFixtures.length === 0) {
-    return 'No encontre partidos para ' + data.dateLabel + '. Proba con otra fecha.';
-  }
-
-  let r = '**Partidos para ' + data.dateLabel + '** (' + data.allFixtures.length + ' total)\n\n';
+  let r = `**Partidos para ${data.dateLabel}** (${data.allFixtures.length})\n\n`;
   const ns = data.allFixtures.filter((f: any) => f.fixture?.status?.short === 'NS');
   const byLeague: Record<string, any[]> = {};
   for (const f of ns.slice(0, 20)) {
@@ -386,13 +317,13 @@ function generateReport(data: MatchData): string {
     byLeague[ln].push(f);
   }
   for (const [league, matches] of Object.entries(byLeague)) {
-    r += '**' + league + '**\n';
+    r += `**${league}**\n`;
     for (const f of matches) {
       const t = f.fixture?.date ? new Date(f.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
-      r += t + ' - ' + (f.teams?.home?.name || '?') + ' vs ' + (f.teams?.away?.name || '?') + '\n';
+      r += `${t} - ${f.teams?.home?.name} vs ${f.teams?.away?.name}\n`;
     }
     r += '\n';
   }
-  r += 'Preguntame por un partido especifico para el informe completo.\n\nPodes apostar en 1Win con las mejores cuotas.\n\nLas apuestas implican riesgo. Aposta responsablemente.';
+  r += 'Preguntame por un partido especifico para el informe completo.\n\nPodes apostar en 1Win.\n\nAposta responsablemente.';
   return r;
 }
