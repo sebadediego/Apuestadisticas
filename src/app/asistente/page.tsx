@@ -84,9 +84,38 @@ export default function AsistentePage() {
 
       <div className="chat-messages">
         {messages.map((m, i) => (
-          <div key={i} className={m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'}>
-            <div dangerouslySetInnerHTML={{ __html: fmt(m.content) }} />
-            <div className="chat-bubble-ts">{m.ts}</div>
+          <div key={i}>
+            <div className={m.role === 'user' ? 'chat-bubble-user' : 'chat-bubble-bot'}>
+              <div dangerouslySetInnerHTML={{ __html: fmt(m.content) }} />
+              <div className="chat-bubble-ts">{m.ts}</div>
+            </div>
+            {/* Show 1Win banner after bot analysis messages (long ones) */}
+            {m.role === 'assistant' && m.content.length > 200 && i > 0 && (
+              <a
+                href="https://lkpq.cc/b8edf9"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  padding: '8px 12px',
+                  margin: '6px 0 10px',
+                  borderRadius: 8,
+                  background: 'linear-gradient(135deg, #060d1f, #122354)',
+                  border: '1px solid rgba(26, 92, 255, 0.2)',
+                  textDecoration: 'none',
+                  maxWidth: '85%',
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/1win-logo.png" alt="1Win" style={{ height: 24, width: 'auto', borderRadius: 3 }} />
+                <span style={{ fontSize: 11, color: '#94a3b8', flex: 1 }}>Aposta con las mejores cuotas</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#fff', background: '#1a5cff', padding: '4px 10px', borderRadius: 4, whiteSpace: 'nowrap' }}>
+                  Ir a 1Win
+                </span>
+              </a>
+            )}
           </div>
         ))}
         {loading && (
