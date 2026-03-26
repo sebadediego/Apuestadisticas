@@ -154,20 +154,50 @@ export function getCurrentSeason(): number {
   return now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
 }
 
-// CAMBIO 10 — Top leagues actualizadas y en orden
+// Ligas y competiciones prioritarias — orden de importancia
 export const TOP_LEAGUES = [
+  // Ligas principales sudamericanas
   { id: 128, name: 'Liga Profesional Argentina', country: 'Argentina' },
   { id: 71, name: 'Brasileirao Serie A', country: 'Brazil' },
+  { id: 239, name: 'Primera Division Uruguay', country: 'Uruguay' },
+  { id: 262, name: 'Liga MX', country: 'Mexico' },
+  { id: 239, name: 'Primera A Colombia', country: 'Colombia' },
+  // Top 5 europeas
   { id: 39, name: 'Premier League', country: 'England' },
   { id: 140, name: 'La Liga', country: 'Spain' },
   { id: 135, name: 'Serie A', country: 'Italy' },
   { id: 61, name: 'Ligue 1', country: 'France' },
   { id: 78, name: 'Bundesliga', country: 'Germany' },
+  // Otras ligas europeas importantes
+  { id: 94, name: 'Primeira Liga', country: 'Portugal' },
+  { id: 88, name: 'Eredivisie', country: 'Netherlands' },
+  { id: 144, name: 'Jupiler Pro League', country: 'Belgium' },
+  // Competiciones internacionales de clubes
   { id: 2, name: 'Champions League', country: 'World' },
+  { id: 3, name: 'Europa League', country: 'World' },
+  { id: 848, name: 'Conference League', country: 'World' },
   { id: 13, name: 'Copa Libertadores', country: 'World' },
+  { id: 11, name: 'Copa Sudamericana', country: 'World' },
+  // Copas nacionales
+  { id: 130, name: 'Copa Argentina', country: 'Argentina' },
+  { id: 73, name: 'Copa do Brasil', country: 'Brazil' },
+  { id: 45, name: 'FA Cup', country: 'England' },
+  { id: 143, name: 'Copa del Rey', country: 'Spain' },
+  { id: 137, name: 'Coppa Italia', country: 'Italy' },
+  { id: 65, name: 'Coupe de France', country: 'France' },
+  { id: 81, name: 'DFB Pokal', country: 'Germany' },
+  // Selecciones — eliminatorias y copas
+  { id: 1, name: 'World Cup', country: 'World' },
+  { id: 4, name: 'Euro Championship', country: 'World' },
+  { id: 9, name: 'Copa America', country: 'World' },
+  { id: 29, name: 'World Cup Qualifying South America', country: 'World' },
+  { id: 32, name: 'World Cup Qualifying Europe', country: 'World' },
+  { id: 30, name: 'World Cup Qualifying North America', country: 'World' },
+  { id: 34, name: 'Friendlies', country: 'World' },
+  { id: 10, name: 'Friendlies', country: 'World' },
 ];
 
-export const TOP_LEAGUE_IDS = TOP_LEAGUES.map(l => l.id);
+export const TOP_LEAGUE_IDS = [...new Set(TOP_LEAGUES.map(l => l.id))];
 
 // Status mapping for fixtures
 export const FIXTURE_STATUS: Record<string, { label: string; color: string; live: boolean }> = {

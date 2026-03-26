@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import Banner1Win from '@/components/Banner1Win';
 
 const AFFILIATE_LINK = 'https://lkpq.cc/b8edf9';
-const TOP_LEAGUE_IDS = [128, 71, 39, 140, 135, 61, 78, 2, 13];
+const TOP_LEAGUE_IDS = [128, 71, 239, 262, 39, 140, 135, 61, 78, 94, 88, 2, 3, 848, 13, 11, 130, 73, 1, 4, 9, 29, 32, 30, 34, 10];
 
 interface TipData {
   fixture: any;

@@ -72,11 +72,27 @@ export async function POST(request: NextRequest) {
     }
 
     // Build compact fixture list for Groq to identify the match
-    const nsList = allFixtures.filter((f: any) => ['NS', 'TBD', '1H', '2H', 'HT'].includes(f.fixture?.status?.short));
-    let fixtureListContext = '=== PARTIDOS DISPONIBLES ===\n';
+    // Sort: top leagues first so important matches are always visible
+    const TOP_IDS = [128, 71, 239, 262, 39, 140, 135, 61, 78, 94, 88, 2, 3, 848, 13, 11, 130, 73, 45, 143, 137, 65, 81, 1, 4, 9, 29, 32, 30, 34, 10];
+    const nsList = allFixtures
+      .filter((f: any) => ['NS', 'TBD', '1H', '2H', 'HT'].includes(f.fixture?.status?.short))
+      .sort((a: any, b: any) => {
+        const aTop = TOP_IDS.indexOf(a.league?.id);
+        const bTop = TOP_IDS.indexOf(b.league?.id);
+        // Friendlies (ID 10) also important for national teams
+        const aFriendly = a.league?.name?.toLowerCase().includes('friendl') ? 0 : 1;
+        const bFriendly = b.league?.name?.toLowerCase().includes('friendl') ? 0 : 1;
+        if (aTop !== -1 && bTop !== -1) return aTop - bTop;
+        if (aTop !== -1) return -1;
+        if (bTop !== -1) return 1;
+        if (aFriendly !== bFriendly) return aFriendly - bFriendly;
+        return 0;
+      });
+
+    let fixtureListContext = '=== PARTIDOS DISPONIBLES (HOY + MANANA + PASADO) ===\n';
     fixtureListContext += 'Formato: [FIXTURE_ID] Hora(Argentina) - Equipo1 vs Equipo2 (Liga) [Fecha]\n\n';
 
-    for (const f of nsList.slice(0, 60)) {
+    for (const f of nsList.slice(0, 80)) {
       const fid = f.fixture?.id;
       const time = f.fixture?.date
         ? new Date(f.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' })
@@ -169,17 +185,19 @@ Si preguntan algo que NO es de futbol/apuestas, deci amablemente que solo podes 
 NO uses emojis. Se breve y natural.`;
 
 const SYSTEM_PROMPT_STEP1 = `Sos un asistente experto en futbol. Tu trabajo es:
-1. Leer la lista de partidos disponibles que te paso
+1. Leer la lista de partidos disponibles que te paso (incluye partidos de HOY, MANANA y PASADO MANANA)
 2. Entender que equipo o partido quiere el usuario (aunque escriba mal el nombre, con errores de tipeo, en espanol o ingles)
-3. Si identificas un partido, responde brevemente que lo encontraste y agrega al FINAL de tu respuesta la etiqueta FIXTURE_ID: seguido del numero ID del fixture. Ejemplo: "FIXTURE_ID: 1234567"
+3. Si identificas un partido, responde brevemente que lo encontraste, menciona CUANDO juega (hoy, manana, etc), y agrega al FINAL de tu respuesta la etiqueta FIXTURE_ID: seguido del numero ID del fixture. Ejemplo: "FIXTURE_ID: 1234567"
 4. Si el usuario no pregunta por un partido especifico sino que quiere recomendaciones, sugeri 2-3 partidos interesantes de la lista
-5. Si no encontras el partido, deci amablemente que no lo encontraste y mostra algunos partidos disponibles
+5. Si no encontras el partido en la lista, deci que no encontraste partidos para ese equipo en los proximos dias
 
 IMPORTANTE:
-- Los nombres de equipos en la lista estan en ingles (Brazil, France, Turkey, etc). El usuario puede escribir en espanol (Brasil, Francia, Turquia)
-- Interpreta errores de tipeo: "brsil" = Brasil, "turkia" = Turquia, "fransia" = Francia
+- La lista tiene partidos de MULTIPLES dias (HOY, MANANA, PASADO). Busca en TODOS.
+- Los nombres de equipos estan en ingles (Brazil, France, Turkey, Argentina, etc). El usuario puede escribir en espanol.
+- Interpreta errores de tipeo: "brsil" = Brasil = Brazil, "turkia" = Turquia = Turkey, "fransia" = Francia = France
+- "Argentina" puede referirse a la seleccion Argentina (busca "Argentina" en la lista)
 - SIEMPRE que identifiques un partido, pone FIXTURE_ID: [numero] al final
-- Habla en espanol argentino, se amigable
+- Habla en espanol argentino, se amigable y breve
 - Las horas ya estan en hora argentina
 - NO uses emojis`;
 
