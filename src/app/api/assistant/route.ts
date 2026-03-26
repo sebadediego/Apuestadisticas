@@ -26,10 +26,15 @@ export async function POST(request: NextRequest) {
     let aiResponse = '';
 
     if (GEMINI_KEY) {
+      console.log('[Assistant] Using Gemini API');
       aiResponse = await callGemini(systemPrompt, message, context, conversationHistory);
+      if (!aiResponse) console.log('[Assistant] Gemini returned empty response');
+    } else {
+      console.log('[Assistant] No GEMINI_API_KEY found');
     }
 
     if (!aiResponse && ANTHROPIC_KEY) {
+      console.log('[Assistant] Using Anthropic API');
       aiResponse = await callAnthropic(systemPrompt, message, context, conversationHistory);
     }
 

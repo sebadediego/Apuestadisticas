@@ -1,4 +1,4 @@
-import { getFixtures, getOdds, TOP_LEAGUES } from '@/lib/api-football';
+import { getFixtures, getOdds, TOP_LEAGUES, TOP_LEAGUE_IDS } from '@/lib/api-football';
 import PartidosClient from './PartidosClient';
 
 function getTodayDate() {
@@ -48,9 +48,16 @@ export default async function PartidosPage({ searchParams }: PageProps) {
   }
 
   const sortedLeagues = Object.entries(grouped)
-    .sort(([, a], [, b]) =>
-      (a.league?.name || '').localeCompare(b.league?.name || '')
-    )
+    .sort(([aId], [bId]) => {
+      const aTop = TOP_LEAGUE_IDS.indexOf(Number(aId));
+      const bTop = TOP_LEAGUE_IDS.indexOf(Number(bId));
+      if (aTop !== -1 && bTop !== -1) return aTop - bTop;
+      if (aTop !== -1) return -1;
+      if (bTop !== -1) return 1;
+      return (grouped[Number(aId)].league?.name || '').localeCompare(
+        grouped[Number(bId)].league?.name || ''
+      );
+    })
     .map(([id, data]) => ({ id: Number(id), ...data }));
 
   // Fetch odds per fixture for all NS matches (paid plan)
