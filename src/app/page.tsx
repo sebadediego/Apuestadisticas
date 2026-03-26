@@ -1,8 +1,12 @@
 import { getFixtures, getOdds, TOP_LEAGUE_IDS } from '@/lib/api-football';
 import HomeClient from './HomeClient';
 
+// Force dynamic rendering — always fresh data
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 function getTodayDate() {
-  return new Date().toISOString().split('T')[0];
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
 export default async function HomePage() {

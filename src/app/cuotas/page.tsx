@@ -1,8 +1,11 @@
 import { getFixtures, getOdds, getPredictions, TOP_LEAGUE_IDS } from '@/lib/api-football';
 import ApuestasClient from './ApuestasClient';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 function getTodayDate() {
-  return new Date().toISOString().split('T')[0];
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
 export default async function ApuestasDiaPage() {

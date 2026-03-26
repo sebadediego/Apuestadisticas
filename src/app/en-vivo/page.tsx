@@ -1,7 +1,8 @@
 import { getFixtures, getOdds } from '@/lib/api-football';
 import EnVivoClient from './EnVivoClient';
 
-export const revalidate = 30;
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export default async function EnVivoPage() {
   let fixtures: any[] = [];

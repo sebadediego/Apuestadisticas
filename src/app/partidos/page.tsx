@@ -1,8 +1,11 @@
 import { getFixtures, getOdds, TOP_LEAGUES, TOP_LEAGUE_IDS } from '@/lib/api-football';
 import PartidosClient from './PartidosClient';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 function getTodayDate() {
-  return new Date().toISOString().split('T')[0];
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
 
 // BUG 1 FIX: searchParams is a Promise in Next.js 14.2+
@@ -26,9 +29,7 @@ export default async function PartidosPage({ searchParams }: PageProps) {
     const fetchParams: any = { date };
     if (validLeagueId) {
       fetchParams.league = validLeagueId;
-      // API-Football requires season when filtering by league
-      const now = new Date();
-      fetchParams.season = now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
+      // Don't send season — API-Football returns fixtures for the active season when date is provided
     }
     const res = await getFixtures(fetchParams);
     fixtures = res.response || [];
