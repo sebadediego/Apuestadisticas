@@ -7,7 +7,7 @@ const navItems = [
   { href: '/', label: 'Inicio', icon: 'home' },
   { href: '/partidos', label: 'Partidos', icon: 'calendar' },
   { href: '/en-vivo', label: 'En Vivo', icon: 'live' },
-  { href: '/predicciones', label: 'Tips', icon: 'tips' },
+  { href: '/predicciones', label: 'Apuestips', icon: 'tips' },
   { href: '/asistente', label: 'IA', icon: 'ia' },
 ];
 

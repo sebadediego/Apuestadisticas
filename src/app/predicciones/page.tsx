@@ -1,78 +1,105 @@
 'use client';
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 import Banner1Win from '@/components/Banner1Win';
 
 const AFFILIATE_LINK = 'https://lkpq.cc/b8edf9';
 const TOP_LEAGUE_IDS = [128, 71, 39, 140, 135, 61, 78, 2, 13];
 
-function translateAdvice(advice: string): string {
-  if (!advice) return '';
-  let t = advice;
-  // Common patterns from API-Football predictions
-  t = t.replace(/Combo Double chance/i, 'Doble chance combinada');
-  t = t.replace(/Double chance/i, 'Doble chance');
-  t = t.replace(/or draw/i, 'o empate');
-  t = t.replace(/and target/i, 'y objetivo');
-  t = t.replace(/ goals/i, ' goles');
-  t = t.replace(/ goal/i, ' gol');
-  t = t.replace(/Winner/i, 'Ganador');
-  t = t.replace(/ win /i, ' gana ');
-  t = t.replace(/ draw /i, ' empate ');
-  t = t.replace(/ or /ig, ' o ');
-  t = t.replace(/ and /ig, ' y ');
-  t = t.replace(/Over/g, 'Mas de');
-  t = t.replace(/Under/g, 'Menos de');
-  return t;
+interface TipData {
+  fixture: any;
+  prediction: any;
+  odds: any;
+  analysis: string;
 }
 
-interface PredictionData { fixture: any; prediction: any; }
-
-export default function PrediccionesPage() {
-  const [predictions, setPredictions] = useState<PredictionData[]>([]);
+export default function ApuestipsPage() {
+  const [tips, setTips] = useState<TipData[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function fetchData() {
+    async function fetchTips() {
       try {
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
         const res = await fetch(`/api/football?endpoint=/fixtures&date=${today}&timezone=America/Argentina/Buenos_Aires`);
         const data = await res.json();
 
-        // Filter: only NS, prioritize top leagues
-        const allUpcoming = (data.response || []).filter(
-          (m: any) => ['NS', 'TBD'].includes(m.fixture?.status?.short)
-        );
+        // Filter NS matches, prioritize top leagues
+        const upcoming = (data.response || [])
+          .filter((m: any) => m.fixture?.status?.short === 'NS')
+          .sort((a: any, b: any) => {
+            const aTop = TOP_LEAGUE_IDS.indexOf(a.league?.id);
+            const bTop = TOP_LEAGUE_IDS.indexOf(b.league?.id);
+            if (aTop !== -1 && bTop !== -1) return aTop - bTop;
+            if (aTop !== -1) return -1;
+            if (bTop !== -1) return 1;
+            return 0;
+          });
 
-        // Sort: top leagues first
-        const sorted = allUpcoming.sort((a: any, b: any) => {
-          const aIdx = TOP_LEAGUE_IDS.indexOf(a.league?.id);
-          const bIdx = TOP_LEAGUE_IDS.indexOf(b.league?.id);
-          if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-          if (aIdx !== -1) return -1;
-          if (bIdx !== -1) return 1;
-          return 0;
-        });
+        // Get predictions + odds for top 5, keep best 3 with winner
+        const results: TipData[] = [];
+        for (const fix of upcoming.slice(0, 6)) {
+          if (results.length >= 3) break;
+          const fid = fix.fixture.id;
 
-        // Fetch predictions for top 8, keep max 5 with winner
-        const predResults: PredictionData[] = [];
-        for (const fix of sorted.slice(0, 8)) {
-          if (predResults.length >= 5) break;
+          let prediction: any = null;
+          let odds: any = null;
+
           try {
-            const pRes = await fetch(`/api/football?endpoint=/predictions&fixture=${fix.fixture.id}`);
+            const pRes = await fetch(`/api/football?endpoint=/predictions&fixture=${fid}`);
             const pData = await pRes.json();
-            const pred = pData.response?.[0];
-            // Only show if there's a predicted winner
-            if (pred?.predictions?.winner?.name) {
-              predResults.push({ fixture: fix, prediction: pred });
-            }
+            prediction = pData.response?.[0] || null;
           } catch {}
+
+          try {
+            const oRes = await fetch(`/api/football?endpoint=/odds&fixture=${fid}`);
+            const oData = await oRes.json();
+            odds = oData.response?.[0] || null;
+          } catch {}
+
+          // Only include if we have prediction with winner
+          if (prediction?.predictions?.winner?.name) {
+            // Generate analysis text locally
+            const pred = prediction.predictions;
+            const homeForm = prediction.teams?.home?.league?.form?.slice(-5) || '';
+            const awayForm = prediction.teams?.away?.league?.form?.slice(-5) || '';
+            const homeGoalsAvg = prediction.teams?.home?.league?.goals?.for?.average?.total || '?';
+            const awayGoalsAvg = prediction.teams?.away?.league?.goals?.for?.average?.total || '?';
+            const homeGoalsAgainst = prediction.teams?.home?.league?.goals?.against?.average?.total || '?';
+            const awayGoalsAgainst = prediction.teams?.away?.league?.goals?.against?.average?.total || '?';
+
+            let analysis = '';
+            const home = fix.teams?.home?.name || 'Local';
+            const away = fix.teams?.away?.name || 'Visitante';
+
+            // Form analysis
+            const homeWins = (homeForm.match(/W/g) || []).length;
+            const awayWins = (awayForm.match(/W/g) || []).length;
+
+            if (homeWins > awayWins) {
+              analysis += `${home} viene en mejor forma (${homeForm.split('').join('-')}) vs ${away} (${awayForm.split('').join('-')}). `;
+            } else if (awayWins > homeWins) {
+              analysis += `${away} llega mejor (${awayForm.split('').join('-')}) vs ${home} (${homeForm.split('').join('-')}). `;
+            } else {
+              analysis += `Ambos equipos llegan parejos en forma: ${home} (${homeForm.split('').join('-')}) y ${away} (${awayForm.split('').join('-')}). `;
+            }
+
+            // Goals analysis
+            analysis += `${home} promedia ${homeGoalsAvg} goles a favor y recibe ${homeGoalsAgainst}. ${away} hace ${awayGoalsAvg} y recibe ${awayGoalsAgainst}. `;
+
+            // Tip
+            if (pred.advice) {
+              analysis += `Tip: ${pred.advice}`;
+            }
+
+            results.push({ fixture: fix, prediction, odds, analysis });
+          }
         }
-        setPredictions(predResults);
+
+        setTips(results);
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     }
-    fetchData();
+    fetchTips();
   }, []);
 
   const renderForm = (form: string | undefined) => {
@@ -82,50 +109,78 @@ export default function PrediccionesPage() {
     ));
   };
 
+  const formatTime = (dateStr: string) => {
+    return new Date(dateStr).toLocaleTimeString('es-AR', {
+      hour: '2-digit', minute: '2-digit', hour12: false,
+      timeZone: 'America/Argentina/Buenos_Aires'
+    });
+  };
+
   return (
     <div className="layout-main">
       <div className="page-header">
-        <h1 className="page-title">Predicciones para hoy</h1>
+        <h1 className="page-title">Apuestips</h1>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-          Analisis basado en datos reales de API-Football
+          Los 3 mejores partidos del dia para apostar
         </p>
       </div>
 
-      {/* CAMBIO 6 — Banner 1Win arriba */}
       <Banner1Win variant="full" />
 
       {loading && (
         <div>
-          {Array.from({ length: 3 }).map((_, i) => <div key={i} className="skeleton skeleton-card" />)}
+          {[1,2,3].map(i => <div key={i} className="skeleton skeleton-card" />)}
         </div>
       )}
 
-      {!loading && predictions.length === 0 && (
+      {!loading && tips.length === 0 && (
         <div className="empty-state">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
             <circle cx="12" cy="12" r="10" />
             <path d="M12 16v-4M12 8h.01" />
           </svg>
-          <p>No hay predicciones disponibles para hoy</p>
+          <p>No hay tips disponibles para hoy</p>
         </div>
       )}
 
-      {predictions.map(({ fixture, prediction }) => {
+      {tips.map(({ fixture, prediction, odds, analysis }, idx) => {
         const f = fixture.fixture;
         const teams = fixture.teams;
         const league = fixture.league;
-        const pred = prediction.predictions;
-        const time = f?.date
-          ? new Date(f.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false })
-          : '?';
+        const pred = prediction?.predictions;
+        const time = f?.date ? formatTime(f.date) : '?';
+
+        // Extract 1X2 odds
+        let odds1x2: any = null;
+        if (odds?.bookmakers?.length) {
+          const bk = odds.bookmakers[0];
+          const mw = bk.bets?.find((b: any) => b.name === 'Match Winner' || b.id === 1);
+          if (mw) {
+            odds1x2 = {
+              home: mw.values?.find((v: any) => v.value === 'Home')?.odd,
+              draw: mw.values?.find((v: any) => v.value === 'Draw')?.odd,
+              away: mw.values?.find((v: any) => v.value === 'Away')?.odd,
+            };
+          }
+        }
 
         return (
           <div key={f?.id} className="pred-card">
-            {/* Header: league + time */}
-            <div className="pred-header">
-              {league?.logo && <img src={league.logo} alt="" />}
-              <span>{league?.name}</span>
-              <span className="pred-time">{time}</span>
+            {/* Tip number */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <span style={{
+                fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 18,
+                color: 'var(--accent-green)', minWidth: 28
+              }}>
+                #{idx + 1}
+              </span>
+              <div style={{ flex: 1 }}>
+                <div className="pred-header" style={{ marginBottom: 0 }}>
+                  {league?.logo && <img src={league.logo} alt="" />}
+                  <span>{league?.name}</span>
+                  <span className="pred-time">{time}hs</span>
+                </div>
+              </div>
             </div>
 
             {/* Teams with form */}
@@ -135,27 +190,23 @@ export default function PrediccionesPage() {
                 <div className="pred-team-info">
                   <div className="pred-team-name">{teams?.home?.name}</div>
                   <div className="pred-team-form">
-                    {renderForm(prediction.teams?.home?.league?.form)}
+                    {renderForm(prediction?.teams?.home?.league?.form)}
                   </div>
                 </div>
               </div>
-
               <div className="pred-vs">
                 {pred?.winner?.name ? (
                   <span className="pred-winner-badge">
                     {pred.winner.name.split(' ').slice(0, 2).join(' ')}
                   </span>
-                ) : (
-                  'VS'
-                )}
+                ) : 'VS'}
               </div>
-
               <div className="pred-team away">
                 {teams?.away?.logo && <img src={teams.away.logo} alt="" />}
                 <div className="pred-team-info">
                   <div className="pred-team-name">{teams?.away?.name}</div>
                   <div className="pred-team-form">
-                    {renderForm(prediction.teams?.away?.league?.form)}
+                    {renderForm(prediction?.teams?.away?.league?.form)}
                   </div>
                 </div>
               </div>
@@ -177,18 +228,29 @@ export default function PrediccionesPage() {
               </div>
             )}
 
-            {/* Advice */}
-            {pred?.advice && (
-              <div className="pred-advice">{translateAdvice(pred.advice)}</div>
+            {/* 1X2 Odds */}
+            {odds1x2 && (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                <a href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="apuesta-odd" style={{ flex: 1 }}>
+                  <span className="apuesta-odd-label">1</span>
+                  <span className="apuesta-odd-value">{odds1x2.home || '—'}</span>
+                </a>
+                <a href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="apuesta-odd" style={{ flex: 1 }}>
+                  <span className="apuesta-odd-label">X</span>
+                  <span className="apuesta-odd-value" style={{ color: 'var(--accent-amber)' }}>{odds1x2.draw || '—'}</span>
+                </a>
+                <a href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="apuesta-odd" style={{ flex: 1 }}>
+                  <span className="apuesta-odd-label">2</span>
+                  <span className="apuesta-odd-value" style={{ color: 'var(--accent-cyan)' }}>{odds1x2.away || '—'}</span>
+                </a>
+              </div>
             )}
 
-            {/* Bet button — CAMBIO 6 */}
-            <a
-              href={AFFILIATE_LINK}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="pred-bet-btn"
-            >
+            {/* Analysis */}
+            <div className="pred-advice">{analysis}</div>
+
+            {/* Bet button */}
+            <a href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="pred-bet-btn">
               Apostar en 1Win
             </a>
           </div>

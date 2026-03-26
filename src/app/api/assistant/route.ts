@@ -9,113 +9,204 @@ import {
 } from '@/lib/data-processor';
 
 const GROQ_KEY = process.env.GROQ_API_KEY || '';
-const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
 
 export async function POST(request: NextRequest) {
   try {
     const { message, conversationHistory } = await request.json();
     if (!message) return NextResponse.json({ error: 'Missing message' }, { status: 400 });
 
-    // Detect intent — only fetch football data when needed
-    const intent = detectIntent(message);
-    let context = '';
+    const lower = message.toLowerCase();
+    const isGreeting = ['hola', 'buenas', 'hey', 'que tal', 'buen dia', 'hi', 'hello', 'como estas', 'buenas tardes', 'buenas noches'].some(g => lower.includes(g)) && lower.length < 25;
+    const isLive = ['en vivo', 'live', 'ahora', 'jugando'].some(k => lower.includes(k));
 
-    if (intent.needsData) {
-      context = await gatherContext(message, intent);
+    // GREETING — no data needed
+    if (isGreeting) {
+      const resp = await callGroq(SYSTEM_PROMPT_CHAT, message, conversationHistory, '');
+      return NextResponse.json({ response: resp || 'Hola! Soy el asistente de Apuestadisticas. Preguntame sobre cualquier partido, cuotas o predicciones.' });
     }
 
-    const systemPrompt = buildSystemPrompt();
-    const userMsg = context
-      ? message + '\n\n--- DATOS REALES (API-Football) ---\n' + context + '\n--- FIN DATOS ---'
-      : message;
+    // LIVE — fetch live fixtures
+    if (isLive) {
+      const live = await getLiveFixtures();
+      const arr = live.response || [];
+      let context = '=== PARTIDOS EN VIVO ===\n';
+      if (arr.length === 0) {
+        context += 'No hay partidos en vivo en este momento.';
+      } else {
+        arr.slice(0, 12).forEach((f: any) => {
+          const h = f.teams?.home?.name || '?';
+          const a = f.teams?.away?.name || '?';
+          const gh = f.goals?.home ?? 0;
+          const ga = f.goals?.away ?? 0;
+          const min = f.fixture?.status?.elapsed || '?';
+          const league = f.league?.name || '';
+          context += `${h} ${gh}-${ga} ${a} (${min}') - ${league}\n`;
+        });
+      }
+      const resp = await callGroq(SYSTEM_PROMPT_ANALYSIS, message, conversationHistory, context);
+      return NextResponse.json({ response: resp || 'No hay partidos en vivo en este momento.' });
+    }
 
-    // Try Groq
-    let response = '';
-    if (GROQ_KEY) {
-      response = await callGroq(systemPrompt, userMsg, conversationHistory);
-    }
-    if (!response && GEMINI_KEY) {
-      response = await callGemini(systemPrompt, userMsg, conversationHistory);
-    }
-    if (!response) {
-      response = 'Disculpa, no pude procesar tu consulta en este momento. Intenta de nuevo.';
+    // FOOTBALL QUERY — fetch fixtures for today/tomorrow, send list to Groq
+    // Determine date
+    const today = getArgDate();
+    const tomorrow = addDays(today, 1);
+    const dayAfter = addDays(today, 2);
+
+    const wantsTomorrow = lower.includes('manana') || lower.includes('mañana');
+    const primaryDate = wantsTomorrow ? tomorrow : today;
+
+    // Fetch fixtures for primary date + secondary
+    let allFixtures: any[] = [];
+    const dates = [primaryDate];
+    if (!wantsTomorrow) dates.push(tomorrow);
+    else dates.push(today);
+    dates.push(dayAfter);
+
+    for (const d of dates) {
+      try {
+        const res = await getFixtures({ date: d });
+        const arr = res.response || [];
+        allFixtures.push(...arr.map((f: any) => ({ ...f, _date: d })));
+      } catch {}
     }
 
-    return NextResponse.json({ response });
+    // Build compact fixture list for Groq to identify the match
+    const nsList = allFixtures.filter((f: any) => ['NS', 'TBD', '1H', '2H', 'HT'].includes(f.fixture?.status?.short));
+    let fixtureListContext = '=== PARTIDOS DISPONIBLES ===\n';
+    fixtureListContext += 'Formato: [FIXTURE_ID] Hora(Argentina) - Equipo1 vs Equipo2 (Liga) [Fecha]\n\n';
+
+    for (const f of nsList.slice(0, 60)) {
+      const fid = f.fixture?.id;
+      const time = f.fixture?.date
+        ? new Date(f.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' })
+        : '?';
+      const dateLabel = f._date === today ? 'HOY' : f._date === tomorrow ? 'MANANA' : 'PASADO';
+      const h = f.teams?.home?.name || '?';
+      const a = f.teams?.away?.name || '?';
+      const league = f.league?.name || '';
+      fixtureListContext += `[${fid}] ${time}hs - ${h} vs ${a} (${league}) [${dateLabel}]\n`;
+    }
+
+    // STEP 1: Ask Groq to identify the fixture and respond
+    // If user asks about a specific match, Groq will mention the FIXTURE_ID
+    const step1Prompt = SYSTEM_PROMPT_STEP1;
+    const step1Response = await callGroq(step1Prompt, message, conversationHistory, fixtureListContext);
+
+    if (!step1Response) {
+      return NextResponse.json({ response: 'No pude procesar tu consulta. Intenta de nuevo.' });
+    }
+
+    // STEP 2: Check if Groq identified a specific fixture (look for FIXTURE_ID pattern)
+    const fixtureIdMatch = step1Response.match(/FIXTURE_ID[:\s]*(\d+)/i);
+
+    if (fixtureIdMatch) {
+      const fid = parseInt(fixtureIdMatch[1]);
+      const fixture = allFixtures.find((f: any) => f.fixture?.id === fid);
+
+      if (fixture) {
+        // Fetch detailed data for this fixture
+        let detailedContext = '=== PARTIDO SELECCIONADO ===\n';
+        detailedContext += processFixtureForContext(fixture) + '\n';
+
+        const time = fixture.fixture?.date
+          ? new Date(fixture.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' })
+          : '?';
+        detailedContext += 'Hora Argentina: ' + time + 'hs\n';
+
+        // Odds
+        try {
+          const o = await getOdds({ fixture: fid });
+          if (o.response?.length) {
+            detailedContext += '\n=== CUOTAS ===\n';
+            detailedContext += processOddsForContext(o.response[0]);
+          }
+        } catch {}
+
+        // Prediction (includes form, goals avg, comparison)
+        try {
+          const p = await getPredictions(fid);
+          if (p.response?.length) {
+            detailedContext += '\n=== PREDICCION Y ESTADISTICAS ===\n';
+            detailedContext += processPredictionForContext(p.response[0]);
+          }
+        } catch {}
+
+        // H2H
+        const hid = fixture.teams?.home?.id;
+        const aid = fixture.teams?.away?.id;
+        if (hid && aid) {
+          try {
+            const h = await getHeadToHead({ h2h: `${hid}-${aid}`, last: 5 });
+            if (h.response?.length) {
+              detailedContext += '\n=== HISTORIAL DIRECTO ===\n';
+              detailedContext += processH2HForContext(h.response);
+            }
+          } catch {}
+        }
+
+        // STEP 2: Send detailed data to Groq for exhaustive analysis
+        const analysisResponse = await callGroq(SYSTEM_PROMPT_ANALYSIS, message, conversationHistory, detailedContext);
+        return NextResponse.json({ response: analysisResponse || step1Response.replace(/FIXTURE_ID[:\s]*\d+/gi, '').trim() });
+      }
+    }
+
+    // No fixture identified — return step1 response (cleaned)
+    const cleanResponse = step1Response.replace(/FIXTURE_ID[:\s]*\d+/gi, '').trim();
+    return NextResponse.json({ response: cleanResponse });
+
   } catch (error: any) {
     console.error('Assistant error:', error);
-    return NextResponse.json({ error: 'Error procesando la solicitud' }, { status: 500 });
+    return NextResponse.json({ response: 'Hubo un error al procesar tu consulta. Intenta de nuevo.' });
   }
 }
 
-// ==================== INTENT DETECTION ====================
-interface Intent {
-  needsData: boolean;
-  isGreeting: boolean;
-  isLive: boolean;
-  isSpecificMatch: boolean;
-  wantsTomorrow: boolean;
-  wantsRecommendation: boolean;
-}
+// ==================== SYSTEM PROMPTS ====================
+const SYSTEM_PROMPT_CHAT = `Sos "Apuestadisticas Bot", un asistente amigable de apuestas deportivas.
+Hablas en espanol argentino (vos, sos, podes, dale, etc.).
+Si te saludan, responde amigablemente, presentate y pregunta en que podes ayudar.
+Si preguntan algo que NO es de futbol/apuestas, deci amablemente que solo podes ayudar con eso.
+NO uses emojis. Se breve y natural.`;
 
-function detectIntent(msg: string): Intent {
-  const lower = msg.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+const SYSTEM_PROMPT_STEP1 = `Sos un asistente experto en futbol. Tu trabajo es:
+1. Leer la lista de partidos disponibles que te paso
+2. Entender que equipo o partido quiere el usuario (aunque escriba mal el nombre, con errores de tipeo, en espanol o ingles)
+3. Si identificas un partido, responde brevemente que lo encontraste y agrega al FINAL de tu respuesta la etiqueta FIXTURE_ID: seguido del numero ID del fixture. Ejemplo: "FIXTURE_ID: 1234567"
+4. Si el usuario no pregunta por un partido especifico sino que quiere recomendaciones, sugeri 2-3 partidos interesantes de la lista
+5. Si no encontras el partido, deci amablemente que no lo encontraste y mostra algunos partidos disponibles
 
-  const greetings = ['hola', 'buenas', 'hey', 'que tal', 'buen dia', 'buenas tardes', 'buenas noches', 'como estas', 'hi', 'hello'];
-  const isGreeting = greetings.some(g => lower.includes(g)) && lower.length < 30;
+IMPORTANTE:
+- Los nombres de equipos en la lista estan en ingles (Brazil, France, Turkey, etc). El usuario puede escribir en espanol (Brasil, Francia, Turquia)
+- Interpreta errores de tipeo: "brsil" = Brasil, "turkia" = Turquia, "fransia" = Francia
+- SIEMPRE que identifiques un partido, pone FIXTURE_ID: [numero] al final
+- Habla en espanol argentino, se amigable
+- Las horas ya estan en hora argentina
+- NO uses emojis`;
 
-  const footballKeywords = ['partido', 'partidos', 'apostar', 'apuesta', 'cuota', 'cuotas', 'prediccion',
-    'pronostico', 'gol', 'goles', 'equipo', 'liga', 'futbol', 'juega', 'juegan', 'hoy', 'manana',
-    'recomend', 'pick', 'mejor', 'analisis', 'versus', ' vs ', 'contra', 'vivo', 'live',
-    'over', 'under', 'btts', 'ganador', 'empate', 'resultado', 'marcador', 'score'];
+const SYSTEM_PROMPT_ANALYSIS = `Sos "Apuestadisticas Bot", un analista deportivo EXPERTO en apuestas de futbol.
+Hablas en espanol argentino (vos, sos, podes).
 
-  const isLive = ['vivo', 'live', 'ahora', 'jugando'].some(k => lower.includes(k));
-  const wantsTomorrow = lower.includes('manana') || lower.includes('mañana');
-  const wantsRecommendation = ['recomend', 'pick', 'mejor', 'apostar', 'apuesta', 'que jugar', 'a que le'].some(k => lower.includes(k));
+CUANDO TE DAN DATOS DE UN PARTIDO ESPECIFICO, genera un INFORME ANALITICO EXHAUSTIVO:
 
-  // Check if the message mentions any team-like words (4+ letter words that aren't common Spanish)
-  const commonWords = new Set(['para', 'como', 'que', 'esto', 'esta', 'esos', 'esas', 'algo', 'nada', 'todo', 'bien', 'bueno', 'malo', 'puede', 'quiero', 'donde', 'cuando', 'porque', 'gracias', 'favor', 'decir', 'hacer', 'tener', 'haber', 'poder', 'saber', 'deber']);
-  const words = lower.split(/\s+/);
-  const hasTeamName = words.some(w => w.length >= 4 && !commonWords.has(w) && !greetings.includes(w) && !footballKeywords.includes(w));
+1. **Presentacion**: Equipos, liga, hora (ya viene en hora Argentina, NO la conviertas)
+2. **Analisis de forma**: Mira los ultimos 5 partidos de cada equipo (forma W/D/L). Explica quien viene mejor, quien gano mas, quien perdio mas.
+3. **Analisis de goles**: Promedio de goles a favor y en contra de cada equipo. Analiza si son equipos goleadores o defensivos.
+4. **Historial directo (H2H)**: Si hay datos, analiza los ultimos enfrentamientos. Quien domina historicamente.
+5. **Cuotas y valor**: Analiza las cuotas disponibles. Explica cual tiene valor. Compara la cuota con la probabilidad real segun los datos.
+6. **Mercados recomendados**: Recomienda 2-3 mercados especificos (ejemplo: "Over 2.5 goles a cuota 1.85 tiene valor porque ambos equipos promedian mas de 1 gol por partido")
+7. **Prediccion final**: Da tu prediccion concreta y tu tip de apuesta principal.
 
-  const hasFootballKeyword = footballKeywords.some(k => lower.includes(k));
-  const isSpecificMatch = hasTeamName && (hasFootballKeyword || wantsRecommendation || lower.includes('vs') || lower.includes('contra'));
+REGLAS:
+- NUNCA digas "no puedo ayudar" o "es muy parejo". SIEMPRE da una recomendacion concreta.
+- Si los datos dicen 33%/33%/33%, analiza mas profundo: forma, goles, H2H para desempatar.
+- Basate SOLO en los datos reales proporcionados.
+- Se detallado y analitico, como un tipster profesional.
+- Al final agrega: "Podes apostar en 1Win con las mejores cuotas."
+- Termina con: "Las apuestas implican riesgo. Aposta responsablemente."
+- NO uses emojis.
+- Usa **negritas** para datos clave.`;
 
-  const needsData = !isGreeting && (hasFootballKeyword || isLive || isSpecificMatch || hasTeamName);
-
-  return { needsData, isGreeting, isLive, isSpecificMatch, wantsTomorrow, wantsRecommendation };
-}
-
-// ==================== SYSTEM PROMPT ====================
-function buildSystemPrompt(): string {
-  return [
-    'Sos "Apuestadisticas Bot", un analista deportivo experto en futbol y apuestas.',
-    'Tu personalidad es amigable, cercana, como un amigo que sabe mucho de futbol.',
-    'Hablas en espanol argentino (usas vos, sos, podes, dale, etc.).',
-    '',
-    'COMPORTAMIENTO:',
-    '- Si te saludan (hola, buenas, etc), respondé de forma amigable y breve, presentate y pregunta en que podes ayudar. NO listes partidos.',
-    '- Si preguntan algo que NO es de futbol/apuestas, decí amablemente que solo podes ayudar con temas de futbol y apuestas.',
-    '- Si preguntan por un partido especifico, genera un INFORME ANALITICO con: analisis, cuotas, mercados recomendados, prediccion.',
-    '- Si piden recomendaciones generales, analiza los datos y recomienda los mejores partidos para apostar.',
-    '- Si preguntan por partidos en vivo, resume los scores actuales.',
-    '',
-    'CUANDO HAY DATOS REALES:',
-    '- Basate SOLO en los datos entre "DATOS REALES". No inventes.',
-    '- Analiza las cuotas y explica cuales tienen valor.',
-    '- Da una recomendacion concreta.',
-    '- Menciona mercados: 1X2, Over/Under, Ambos Marcan, etc.',
-    '',
-    'FORMATO:',
-    '- Parrafos cortos y claros.',
-    '- Usa **negritas** para datos importantes.',
-    '- NO uses emojis.',
-    '- Al final de recomendaciones: "Podes apostar en 1Win con las mejores cuotas."',
-    '- Siempre en recomendaciones: "Las apuestas implican riesgo. Aposta responsablemente."',
-  ].join('\n');
-}
-
-// ==================== CONTEXT GATHERING ====================
+// ==================== HELPERS ====================
 function getArgDate(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 }
@@ -126,187 +217,30 @@ function addDays(d: string, n: number): string {
   return dt.toISOString().split('T')[0];
 }
 
-function findMatch(query: string, fixtures: any[]): any | null {
-  const q = query.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  for (const fix of fixtures) {
-    for (const side of ['home', 'away']) {
-      const name = (fix.teams?.[side]?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      for (const w of name.split(/[\s\-]+/)) {
-        if (w.length >= 3 && q.includes(w)) return fix;
-      }
-    }
-  }
-  return null;
-}
-
-async function gatherContext(message: string, intent: Intent): Promise<string> {
-  const lower = message.toLowerCase();
-  const parts: string[] = [];
-
+// ==================== GROQ ====================
+async function callGroq(system: string, userMsg: string, history: any[], context: string): Promise<string> {
+  if (!GROQ_KEY) return '';
   try {
-    // Live matches
-    if (intent.isLive) {
-      const live = await getLiveFixtures();
-      const arr = live.response || [];
-      if (arr.length === 0) {
-        parts.push('No hay partidos en vivo en este momento.');
-      } else {
-        parts.push('=== PARTIDOS EN VIVO ===');
-        arr.slice(0, 10).forEach((f: any) => parts.push(processFixtureForContext(f)));
-      }
-      return parts.join('\n');
-    }
-
-    // Determine dates to search
-    const today = getArgDate();
-    const tomorrow = addDays(today, 1);
-    const dayAfter = addDays(today, 2);
-
-    const primaryDate = intent.wantsTomorrow ? tomorrow : today;
-    const datesToSearch = intent.wantsTomorrow
-      ? [tomorrow, today, dayAfter]
-      : [today, tomorrow, dayAfter];
-
-    // Fetch primary date fixtures
-    const res = await getFixtures({ date: primaryDate });
-    let fixtures = res.response || [];
-    let specific = findMatch(lower, fixtures);
-    let usedDate = primaryDate;
-
-    // If not found, try other dates
-    if (!specific) {
-      for (const d of datesToSearch.filter(x => x !== primaryDate)) {
-        try {
-          const r2 = await getFixtures({ date: d });
-          const f2 = r2.response || [];
-          const found = findMatch(lower, f2);
-          if (found) {
-            specific = found;
-            fixtures = f2;
-            usedDate = d;
-            break;
-          }
-        } catch {}
-      }
-    }
-
-    if (specific) {
-      // Found specific match — get full data
-      const fid = specific.fixture?.id;
-      parts.push('=== PARTIDO ENCONTRADO ===');
-      parts.push(processFixtureForContext(specific));
-      if (usedDate !== primaryDate) {
-        const label = usedDate === today ? 'hoy' : usedDate === tomorrow ? 'manana' : 'pasado manana';
-        parts.push('(Este partido es ' + label + ')');
-      }
-
-      // Odds
-      try {
-        const o = await getOdds({ fixture: fid });
-        if (o.response?.length) { parts.push('\n=== CUOTAS ==='); parts.push(processOddsForContext(o.response[0])); }
-      } catch {}
-
-      // Prediction
-      try {
-        const p = await getPredictions(fid);
-        if (p.response?.length) { parts.push('\n=== PREDICCION ==='); parts.push(processPredictionForContext(p.response[0])); }
-      } catch {}
-
-      // H2H
-      const hid = specific.teams?.home?.id;
-      const aid = specific.teams?.away?.id;
-      if (hid && aid) {
-        try {
-          const h = await getHeadToHead({ h2h: `${hid}-${aid}`, last: 5 });
-          if (h.response?.length) { parts.push('\n=== HISTORIAL ==='); parts.push(processH2HForContext(h.response)); }
-        } catch {}
-      }
-    } else {
-      // No specific match — list available fixtures for the date
-      const dateLabel = primaryDate === today ? 'hoy' : primaryDate === tomorrow ? 'manana' : 'pasado manana';
-      const ns = fixtures.filter((f: any) => f.fixture?.status?.short === 'NS');
-
-      if (ns.length === 0 && fixtures.length === 0) {
-        parts.push('No se encontraron partidos para ' + dateLabel + '.');
-      } else {
-        parts.push('=== PARTIDOS DISPONIBLES PARA ' + dateLabel.toUpperCase() + ' ===');
-        parts.push('Total: ' + fixtures.length + ' partidos (' + ns.length + ' por jugar)');
-        // Group by league, show max 20
-        const byLeague: Record<string, any[]> = {};
-        for (const f of ns.slice(0, 20)) {
-          const ln = f.league?.name || 'Otra';
-          if (!byLeague[ln]) byLeague[ln] = [];
-          byLeague[ln].push(f);
-        }
-        for (const [league, matches] of Object.entries(byLeague)) {
-          parts.push('\n' + league + ':');
-          for (const f of matches) {
-            const t = f.fixture?.date ? new Date(f.fixture.date).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Buenos_Aires' }) : '';
-            parts.push('  ' + t + ' ' + (f.teams?.home?.name || '?') + ' vs ' + (f.teams?.away?.name || '?'));
-          }
-        }
-      }
-    }
-  } catch (error: any) {
-    parts.push('Error obteniendo datos: ' + error.message);
-  }
-
-  return parts.join('\n');
-}
-
-// ==================== AI CALLS ====================
-async function callGroq(system: string, userMsg: string, history: any[]): Promise<string> {
-  try {
+    const fullUserMsg = context ? userMsg + '\n\n' + context : userMsg;
     const messages = [
       { role: 'system', content: system },
-      ...(history || []).slice(-8).map((m: any) => ({ role: m.role, content: m.content })),
-      { role: 'user', content: userMsg },
+      ...(history || []).slice(-6).map((m: any) => ({ role: m.role, content: m.content })),
+      { role: 'user', content: fullUserMsg },
     ];
 
     const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + GROQ_KEY },
-      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages, max_tokens: 2000, temperature: 0.7 }),
+      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages, max_tokens: 2500, temperature: 0.7 }),
     });
 
     const data = await res.json();
     if (data.error) { console.error('[Groq Error]', JSON.stringify(data.error)); return ''; }
     const text = data.choices?.[0]?.message?.content || '';
-    if (text) console.log('[Assistant] Groq responded OK');
+    if (text) console.log('[Assistant] Groq OK');
     return text;
   } catch (e: any) {
     console.error('[Groq Exception]', e.message);
-    return '';
-  }
-}
-
-async function callGemini(system: string, userMsg: string, history: any[]): Promise<string> {
-  try {
-    const contents = [
-      ...(history || []).slice(-8).map((m: any) => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }],
-      })),
-      { role: 'user', parts: [{ text: userMsg }] },
-    ];
-
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=' + GEMINI_KEY,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents,
-          systemInstruction: { parts: [{ text: system }] },
-          generationConfig: { maxOutputTokens: 2000, temperature: 0.7 },
-        }),
-      }
-    );
-    const data = await res.json();
-    if (data.error) { console.error('[Gemini Error]', JSON.stringify(data.error)); return ''; }
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  } catch (e: any) {
-    console.error('[Gemini Exception]', e.message);
     return '';
   }
 }
