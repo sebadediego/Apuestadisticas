@@ -68,27 +68,44 @@ async function callGemini(system: string, message: string, context: string, hist
       parts: [{ text: message + '\n\n--- DATOS REALES (API-Football) ---\n' + context + '\n--- FIN DATOS ---' }],
     });
 
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
-          contents,
-          generationConfig: {
-            maxOutputTokens: 2000,
-            temperature: 0.7,
-          },
-        }),
-      }
-    );
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`;
+
+    const body = {
+      contents,
+      systemInstruction: { parts: [{ text: system }] },
+      generationConfig: {
+        maxOutputTokens: 2000,
+        temperature: 0.7,
+      },
+    };
+
+    console.log('[Gemini] Calling API...');
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
     const data = await res.json();
+
+    // Log errors for debugging
+    if (data.error) {
+      console.error('[Gemini Error]', JSON.stringify(data.error));
+      return '';
+    }
+
+    if (!data.candidates || data.candidates.length === 0) {
+      console.error('[Gemini] No candidates in response:', JSON.stringify(data).slice(0, 500));
+      return '';
+    }
+
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (text) {
+      console.log('[Assistant] Gemini responded successfully');
+    }
     return text;
-  } catch (e) {
-    console.error('Gemini error:', e);
+  } catch (e: any) {
+    console.error('[Gemini Exception]', e.message);
     return '';
   }
 }
