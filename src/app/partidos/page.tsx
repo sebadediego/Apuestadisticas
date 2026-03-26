@@ -53,56 +53,33 @@ export default async function PartidosPage({ searchParams }: PageProps) {
     )
     .map(([id, data]) => ({ id: Number(id), ...data }));
 
-  // Fetch odds — batch by date + individual fallback for top leagues
+  // Fetch odds per fixture for all NS matches (paid plan)
   let oddsMap: Record<number, { home: string | null; draw: string | null; away: string | null }> = {};
-  try {
-    const oddsRaw = await getOdds({ date });
-    const oddsRes = oddsRaw.response || [];
-    if (Array.isArray(oddsRes)) {
-      for (const item of oddsRes) {
-        const fid = item.fixture?.id;
-        if (!fid) continue;
-        for (const bk of (item.bookmakers || [])) {
-          const market = bk.bets?.find((b: any) => b.id === 1 || b.name === 'Match Winner');
-          if (market) {
-            oddsMap[fid] = {
-              home: market.values?.find((v: any) => v.value === 'Home')?.odd || null,
-              draw: market.values?.find((v: any) => v.value === 'Draw')?.odd || null,
-              away: market.values?.find((v: any) => v.value === 'Away')?.odd || null,
-            };
-            break;
-          }
-        }
-      }
-    }
-  } catch {}
-
-  // Individual odds for NS fixtures in top leagues that don't have odds yet
-  const { TOP_LEAGUE_IDS } = await import('@/lib/api-football');
-  const missingOddsFixtures = fixtures
-    .filter((f: any) => {
-      const fid = f.fixture?.id;
-      const lid = f.league?.id;
-      return fid && TOP_LEAGUE_IDS.includes(lid) && !oddsMap[fid] && f.fixture?.status?.short === 'NS';
-    })
-    .slice(0, 6);
-
-  for (const fix of missingOddsFixtures) {
-    try {
-      const o = await getOdds({ fixture: fix.fixture.id });
-      const arr = o.response || [];
-      if (arr.length > 0) {
-        const bk = arr[0]?.bookmakers?.[0];
-        const market = bk?.bets?.find((b: any) => b.id === 1 || b.name === 'Match Winner');
+  const nsFixtures = fixtures.filter((f: any) => f.fixture?.status?.short === 'NS');
+  const batchSize = 5;
+  for (let i = 0; i < nsFixtures.length; i += batchSize) {
+    const batch = nsFixtures.slice(i, i + batchSize);
+    const results = await Promise.allSettled(
+      batch.map((fix: any) => getOdds({ fixture: fix.fixture.id }))
+    );
+    for (let j = 0; j < results.length; j++) {
+      const result = results[j];
+      if (result.status !== 'fulfilled') continue;
+      const oddsArr = result.value.response || [];
+      if (oddsArr.length === 0) continue;
+      const fid = batch[j].fixture.id;
+      for (const bk of (oddsArr[0]?.bookmakers || [])) {
+        const market = bk.bets?.find((b: any) => b.id === 1 || b.name === 'Match Winner');
         if (market) {
-          oddsMap[fix.fixture.id] = {
+          oddsMap[fid] = {
             home: market.values?.find((v: any) => v.value === 'Home')?.odd || null,
             draw: market.values?.find((v: any) => v.value === 'Draw')?.odd || null,
             away: market.values?.find((v: any) => v.value === 'Away')?.odd || null,
           };
+          break;
         }
       }
-    } catch {}
+    }
   }
 
   return (
