@@ -13,7 +13,7 @@ interface LeagueData {
 interface PartidosClientProps {
   leagues: LeagueData[];
   oddsMap: Record<number, { home: string | null; draw: string | null; away: string | null }>;
-  topLeagues: { id: number; name: string; country: string }[];
+  availableLeagues: { id: number; name: string; country: string }[];
   currentDate: string;
   currentLeague: number | null;
 }
@@ -38,7 +38,7 @@ function getDateChips(current: string) {
 export default function PartidosClient({
   leagues,
   oddsMap,
-  topLeagues,
+  availableLeagues,
   currentDate,
   currentLeague,
 }: PartidosClientProps) {
@@ -82,15 +82,15 @@ export default function PartidosClient({
         ))}
       </div>
 
-      {/* League filter */}
+      {/* League filter — dynamic from available fixtures */}
       <div style={{ padding: '4px 0 8px' }}>
         <select
           className="filter-select"
           value={currentLeague ? String(currentLeague) : 'all'}
           onChange={handleLeagueChange}
         >
-          <option value="all">Todas las ligas</option>
-          {topLeagues.map((l) => (
+          <option value="all">Todas las ligas ({availableLeagues.length})</option>
+          {availableLeagues.map((l) => (
             <option key={l.id} value={String(l.id)}>
               {l.name}
             </option>

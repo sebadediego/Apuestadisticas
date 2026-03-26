@@ -89,11 +89,18 @@ export default async function PartidosPage({ searchParams }: PageProps) {
     }
   }
 
+  // Build available leagues list from actual fixtures (for dynamic filter)
+  const availableLeagues = sortedLeagues.map(l => ({
+    id: l.id,
+    name: l.league?.name || '',
+    country: l.league?.country || '',
+  }));
+
   return (
     <PartidosClient
       leagues={sortedLeagues}
       oddsMap={oddsMap}
-      topLeagues={TOP_LEAGUES}
+      availableLeagues={availableLeagues}
       currentDate={date}
       currentLeague={validLeagueId || null}
     />
