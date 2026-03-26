@@ -58,37 +58,95 @@ export default function ApuestipsPage() {
 
           // Only include if we have prediction with winner
           if (prediction?.predictions?.winner?.name) {
-            // Generate analysis text locally
             const pred = prediction.predictions;
             const homeForm = prediction.teams?.home?.league?.form?.slice(-5) || '';
             const awayForm = prediction.teams?.away?.league?.form?.slice(-5) || '';
-            const homeGoalsAvg = prediction.teams?.home?.league?.goals?.for?.average?.total || '?';
-            const awayGoalsAvg = prediction.teams?.away?.league?.goals?.for?.average?.total || '?';
-            const homeGoalsAgainst = prediction.teams?.home?.league?.goals?.against?.average?.total || '?';
-            const awayGoalsAgainst = prediction.teams?.away?.league?.goals?.against?.average?.total || '?';
+            const homeGoalsAvg = parseFloat(prediction.teams?.home?.league?.goals?.for?.average?.total || '0');
+            const awayGoalsAvg = parseFloat(prediction.teams?.away?.league?.goals?.for?.average?.total || '0');
+            const homeGoalsAgainst = parseFloat(prediction.teams?.home?.league?.goals?.against?.average?.total || '0');
+            const awayGoalsAgainst = parseFloat(prediction.teams?.away?.league?.goals?.against?.average?.total || '0');
+            const homeLast5 = prediction.teams?.home?.last_5;
+            const awayLast5 = prediction.teams?.away?.last_5;
 
-            let analysis = '';
             const home = fix.teams?.home?.name || 'Local';
             const away = fix.teams?.away?.name || 'Visitante';
-
-            // Form analysis
             const homeWins = (homeForm.match(/W/g) || []).length;
             const awayWins = (awayForm.match(/W/g) || []).length;
+            const totalGoalsAvg = homeGoalsAvg + awayGoalsAvg;
 
-            if (homeWins > awayWins) {
-              analysis += `${home} viene en mejor forma (${homeForm.split('').join('-')}) vs ${away} (${awayForm.split('').join('-')}). `;
-            } else if (awayWins > homeWins) {
-              analysis += `${away} llega mejor (${awayForm.split('').join('-')}) vs ${home} (${homeForm.split('').join('-')}). `;
-            } else {
-              analysis += `Ambos equipos llegan parejos en forma: ${home} (${homeForm.split('').join('-')}) y ${away} (${awayForm.split('').join('-')}). `;
+            // Each tip focuses on a DIFFERENT angle based on its position
+            const tipIndex = results.length;
+            let analysis = '';
+
+            // Extract odds for analysis
+            let mwOdds: any = null;
+            let ouOdds: any = null;
+            let bttsOdds: any = null;
+            if (odds?.bookmakers?.length) {
+              const bk = odds.bookmakers[0];
+              mwOdds = bk.bets?.find((b: any) => b.name === 'Match Winner' || b.id === 1);
+              ouOdds = bk.bets?.find((b: any) => b.name === 'Goals Over/Under' || b.id === 5);
+              bttsOdds = bk.bets?.find((b: any) => b.name === 'Both Teams Score' || b.id === 8);
             }
 
-            // Goals analysis
-            analysis += `${home} promedia ${homeGoalsAvg} goles a favor y recibe ${homeGoalsAgainst}. ${away} hace ${awayGoalsAvg} y recibe ${awayGoalsAgainst}. `;
+            if (tipIndex === 0) {
+              // TIP 1: Focus on WINNER + FORM
+              analysis = `${home} (${homeForm.split('').join('-')}) vs ${away} (${awayForm.split('').join('-')}). `;
+              if (homeWins >= 3) {
+                analysis += `${home} viene intratable con ${homeWins} victorias en 5 partidos. `;
+              } else if (awayWins >= 3) {
+                analysis += `${away} llega fuerte con ${awayWins} triunfos en los ultimos 5. `;
+              }
+              const winnerPct = pred.winner.name === home ? pred.percent?.home : pred.percent?.away;
+              analysis += `${pred.winner.name} es favorito con ${winnerPct} de probabilidad. `;
+              if (mwOdds) {
+                const side = pred.winner.name === home ? 'Home' : 'Away';
+                const odd = mwOdds.values?.find((v: any) => v.value === side)?.odd;
+                if (odd) analysis += `Cuota: ${odd}. `;
+              }
+              analysis += `Tip: Ganador ${pred.winner.name}.`;
 
-            // Tip
-            if (pred.advice) {
-              analysis += `Tip: ${pred.advice}`;
+            } else if (tipIndex === 1) {
+              // TIP 2: Focus on GOALS (Over/Under)
+              analysis += `Promedio combinado de goles: ${totalGoalsAvg.toFixed(1)} por partido. `;
+              analysis += `${home} mete ${homeGoalsAvg.toFixed(1)} y recibe ${homeGoalsAgainst.toFixed(1)}. `;
+              analysis += `${away} hace ${awayGoalsAvg.toFixed(1)} y recibe ${awayGoalsAgainst.toFixed(1)}. `;
+              if (totalGoalsAvg > 2.5) {
+                analysis += `Con ese promedio, el Over 2.5 tiene valor. `;
+                if (ouOdds) {
+                  const o25 = ouOdds.values?.find((v: any) => v.value === 'Over 2.5')?.odd;
+                  if (o25) analysis += `Cuota Over 2.5: ${o25}. `;
+                }
+                analysis += `Tip: Over 2.5 goles.`;
+              } else {
+                analysis += `Equipos poco goleadores, el Under 2.5 es mas seguro. `;
+                if (ouOdds) {
+                  const u25 = ouOdds.values?.find((v: any) => v.value === 'Under 2.5')?.odd;
+                  if (u25) analysis += `Cuota Under 2.5: ${u25}. `;
+                }
+                analysis += `Tip: Under 2.5 goles.`;
+              }
+
+            } else {
+              // TIP 3: Focus on BTTS (Both Teams to Score)
+              const bothScoreLikely = homeGoalsAvg >= 1.0 && awayGoalsAvg >= 1.0 && homeGoalsAgainst >= 0.8 && awayGoalsAgainst >= 0.8;
+              analysis += `${home}: ${homeGoalsAvg.toFixed(1)} goles/partido, recibe ${homeGoalsAgainst.toFixed(1)}. `;
+              analysis += `${away}: ${awayGoalsAvg.toFixed(1)} goles/partido, recibe ${awayGoalsAgainst.toFixed(1)}. `;
+              if (bothScoreLikely) {
+                analysis += `Ambos equipos tienen potencial ofensivo y defensa vulnerable. `;
+                if (bttsOdds) {
+                  const yes = bttsOdds.values?.find((v: any) => v.value === 'Yes')?.odd;
+                  if (yes) analysis += `Cuota Ambos Marcan Si: ${yes}. `;
+                }
+                analysis += `Tip: Ambos marcan - Si.`;
+              } else {
+                analysis += `Es dificil que ambos marquen, uno de los dos es muy defensivo. `;
+                if (bttsOdds) {
+                  const no = bttsOdds.values?.find((v: any) => v.value === 'No')?.odd;
+                  if (no) analysis += `Cuota Ambos Marcan No: ${no}. `;
+                }
+                analysis += `Tip: Ambos marcan - No.`;
+              }
             }
 
             results.push({ fixture: fix, prediction, odds, analysis });

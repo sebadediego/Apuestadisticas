@@ -10,7 +10,12 @@ interface LeagueData {
   fixtures: any[];
 }
 
-export default function EnVivoClient({ leagues }: { leagues: LeagueData[] }) {
+interface Props {
+  leagues: LeagueData[];
+  oddsMap: Record<number, { home: string | null; draw: string | null; away: string | null }>;
+}
+
+export default function EnVivoClient({ leagues, oddsMap }: Props) {
   const router = useRouter();
 
   useEffect(() => {
@@ -51,6 +56,7 @@ export default function EnVivoClient({ leagues }: { leagues: LeagueData[] }) {
               logo: l.league.logo || '',
             }}
             fixtures={l.fixtures}
+            oddsMap={oddsMap}
             defaultOpen={true}
           />
         ))
