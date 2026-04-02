@@ -79,7 +79,7 @@ export default function PartidosClient({
     <div className="layout-main">
       <div className="page-header">
         <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
-          <img src="/logo-partidos.png" alt="Partidos" style={{ height: 36, objectFit: 'contain' }} />
+          <img src="/logo-partidos.png" alt="Partidos" style={{ height: 48, objectFit: 'contain' }} />
         </div>
       </div>
 

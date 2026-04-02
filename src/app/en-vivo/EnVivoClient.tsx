@@ -46,7 +46,7 @@ export default function EnVivoClient({ leagues, oddsMap }: Props) {
     <div className="layout-main">
       <div className="page-header">
         <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
-          <img src="/logo-envivo.png" alt="En Vivo" style={{ height: 36, objectFit: 'contain' }} />
+          <img src="/logo-envivo.png" alt="En Vivo" style={{ height: 48, objectFit: 'contain' }} />
         </div>
         <p className="section-subtitle">Actualizacion automatica cada 30 segundos</p>
       </div>
