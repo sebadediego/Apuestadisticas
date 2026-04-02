@@ -1,0 +1,149 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import LeagueAccordion from '@/components/LeagueAccordion';
+import Banner1Win from '@/components/Banner1Win';
+import { filterRelevantLeagues } from '@/lib/league-filter';
+
+interface LeagueData {
+  id: number;
+  league: any;
+  fixtures: any[];
+}
+
+interface PartidosClientProps {
+  leagues: LeagueData[];
+  oddsMap: Record<string, any>;
+  availableLeagues: { id: number; name: string }[];
+  currentDate: string;
+}
+
+function getDateChips(current: string) {
+  const chips = [];
+  for (let i = -2; i <= 3; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    const dateStr = d.toISOString().split('T')[0];
+    let label = '';
+    if (i === -2) label = 'Anteayer';
+    else if (i === -1) label = 'Ayer';
+    else if (i === 0) label = 'Hoy';
+    else if (i === 1) label = 'Manana';
+    else label = d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric' });
+    chips.push({ date: dateStr, label, active: dateStr === current });
+  }
+  return chips;
+}
+
+export default function PartidosClient({
+  leagues,
+  oddsMap,
+  availableLeagues,
+  currentDate,
+}: PartidosClientProps) {
+  const router = useRouter();
+  const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
+
+  function handleDateChange(date: string) {
+    setSelectedLeague(null);
+    setSearch('');
+    router.push(`/partidos?date=${date}`);
+  }
+
+  // Client-side filtering — primero filtrar ligas irrelevantes
+  const relevantLeagues = filterRelevantLeagues(leagues, search);
+
+  let filteredLeagues = selectedLeague
+    ? relevantLeagues.filter(l => l.id === selectedLeague)
+    : relevantLeagues;
+
+  // Search filtering
+  if (search.trim()) {
+    const q = search.toLowerCase();
+    filteredLeagues = filteredLeagues.filter(l => {
+      const leagueName = (l.league?.name || '').toLowerCase();
+      const country = (l.league?.country || '').toLowerCase();
+      const hasTeamMatch = l.fixtures.some((f: any) =>
+        (f.teams?.home?.name || '').toLowerCase().includes(q) ||
+        (f.teams?.away?.name || '').toLowerCase().includes(q)
+      );
+      return leagueName.includes(q) || country.includes(q) || hasTeamMatch;
+    });
+  }
+
+  const dateChips = getDateChips(currentDate);
+
+  return (
+    <div className="layout-main">
+      <div className="page-header">
+        <h1 className="page-title-premium">
+          <span className="page-title-icon">📅</span>
+          Partidos
+        </h1>
+      </div>
+
+      {/* Date navigation */}
+      <div className="date-nav">
+        {dateChips.map((chip) => (
+          <button
+            key={chip.date}
+            className={`date-chip ${chip.active ? 'active' : ''}`}
+            onClick={() => handleDateChange(chip.date)}
+          >
+            {chip.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Search bar */}
+      <div className="search-bar-wrapper">
+        <svg className="search-bar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+        </svg>
+        <input
+          type="text"
+          className="search-bar-input"
+          placeholder="Buscar liga o equipo..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+      </div>
+
+      {/* League filter — CLIENT SIDE */}
+      <div style={{ padding: '0 0 8px' }}>
+        <select
+          className="filter-select"
+          value={selectedLeague ?? 'all'}
+          onChange={(e) => {
+            const val = e.target.value;
+            setSelectedLeague(val === 'all' ? null : Number(val));
+          }}
+        >
+          <option value="all">Todas las ligas ({availableLeagues.length})</option>
+          {availableLeagues.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {filteredLeagues.length === 0 ? (
+        <div className="empty-state">
+          <p>No hay partidos para esta fecha{selectedLeague ? ' y liga seleccionada' : ''}</p>
+        </div>
+      ) : (
+        filteredLeagues.map((leagueData, index) => (
+          <div key={leagueData.id}>
+            <LeagueAccordion league={leagueData.league} fixtures={leagueData.fixtures} oddsMap={oddsMap} defaultOpen={index < 3} />
+            {(index + 1) % 3 === 0 && index < filteredLeagues.length - 1 && (
+              <Banner1Win variant="inline" />
+            )}
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
