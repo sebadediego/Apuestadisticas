@@ -39,7 +39,7 @@ export default function HomeClient({ leagues, oddsMap, topLeagueIds }: HomeClien
     <div className="layout-main">
       {/* Logo header */}
       <div style={{ display: 'flex', justifyContent: 'center', padding: '18px 0 10px' }}>
-        <img src="/logo-apuestadisticas.png" alt="Apuestadísticas" style={{ height: 52, objectFit: 'contain' }} />
+        <img src="/logo-apuestadisticas.png" alt="Apuestadísticas" style={{ width: '85%', maxWidth: 340, height: 'auto', objectFit: 'contain' }} />
       </div>
 
       {/* CAMBIO 6 — Banner 1Win debajo del título */}

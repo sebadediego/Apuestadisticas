@@ -71,7 +71,7 @@ export default function AsistentePage() {
   return (
     <div className="chat-container">
       <div className="chat-header">
-        <img src="/logo-futbot.png" alt="FutBOT" style={{ height: 40, objectFit: 'contain' }} />
+        <img src="/logo-futbot.png" alt="FutBOT" style={{ height: 44, objectFit: 'contain' }} />
         <div className="chat-header-info">
           <div className="chat-header-name">FutBOT</div>
           <div className="chat-header-sub">Datos reales - API-Football</div>
