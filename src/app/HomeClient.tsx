@@ -37,9 +37,9 @@ export default function HomeClient({ leagues, oddsMap, topLeagueIds }: HomeClien
 
   return (
     <div className="layout-main">
-      {/* CAMBIO 5 — Título visible en mobile */}
-      <div className="mini-header">
-        <h1 className="mini-header-title">Apuestadisticas</h1>
+      {/* Logo header */}
+      <div style={{ display: 'flex', justifyContent: 'center', padding: '16px 0 8px' }}>
+        <img src="/logo-apuestadisticas.png" alt="Apuestadísticas" style={{ height: 38, objectFit: 'contain' }} />
       </div>
 
       {/* CAMBIO 6 — Banner 1Win debajo del título */}

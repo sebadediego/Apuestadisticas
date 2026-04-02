@@ -78,10 +78,9 @@ export default function PartidosClient({
   return (
     <div className="layout-main">
       <div className="page-header">
-        <h1 className="page-title-premium">
-          <span className="page-title-icon">📅</span>
-          Partidos
-        </h1>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
+          <img src="/logo-partidos.png" alt="Partidos" style={{ height: 36, objectFit: 'contain' }} />
+        </div>
       </div>
 
       {/* Date navigation */}

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import MatchRowItem from './MatchRowItem';
+import { translateCountry } from '@/lib/country-names';
 
 interface LeagueAccordionProps {
   league: {
@@ -30,7 +31,7 @@ export default function LeagueAccordion({
         <img src={league.logo} alt={league.name} className="league-logo" loading="lazy" />
         <div className="league-info">
           <div className="league-name">{league.name}</div>
-          <div className="league-country">{league.country}</div>
+          <div className="league-country">{translateCountry(league.country)}</div>
         </div>
         <span className="league-count">{fixtures.length}</span>
         <svg className={`league-chevron ${isOpen ? 'open' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

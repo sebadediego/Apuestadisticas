@@ -3,6 +3,7 @@ import {
   getFixtures, getFixtureStatistics, getFixtureEvents, getFixtureLineups,
   getHeadToHead, getOdds, getPredictions, FIXTURE_STATUS
 } from '@/lib/api-football';
+import { translateCountry } from '@/lib/country-names';
 import Link from 'next/link';
 
 export const revalidate = 60;
@@ -112,7 +113,7 @@ export default async function MatchDetailPage({ params }: Props) {
         {/* League */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', marginBottom: 16 }}>
           {league?.logo && <img src={league.logo} alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} />}
-          <span>{league?.name} — {league?.country}</span>
+          <span>{league?.name} — {translateCountry(league?.country || '')}</span>
         </div>
 
         {/* Teams + Score */}

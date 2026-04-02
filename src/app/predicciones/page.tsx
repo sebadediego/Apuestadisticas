@@ -165,10 +165,9 @@ export default function ApuestipsPage() {
   return (
     <div className="layout-main">
       <div className="page-header">
-        <h1 className="page-title-premium">
-          <span className="page-title-icon">🎯</span>
-          Apuestips
-        </h1>
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '4px 0' }}>
+          <img src="/logo-apuestips.png" alt="Apuestips" style={{ height: 36, objectFit: 'contain' }} />
+        </div>
         <p className="section-subtitle">Los 3 mejores partidos del dia para apostar</p>
       </div>
 
