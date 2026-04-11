@@ -183,42 +183,74 @@ export default async function MatchDetailPage({ params }: Props) {
       {/* Cuotas */}
       {matchWinner && (
         <Section title="Cuotas">
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>1X2</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {matchWinner.values.map((v: any) => (
-                <a key={v.value} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="odd-pill" style={{ flex: 1 }}>
-                  <span className="odd-pill-label">{v.value === 'Home' ? 'Local' : v.value === 'Draw' ? 'Empate' : 'Visitante'}</span>
-                  <span className="odd-pill-value">{v.odd}</span>
-                </a>
-              ))}
+          {/* 1X2 */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px' }}>Resultado final</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              {matchWinner.values.map((v: any) => {
+                const label = v.value === 'Home' ? '1' : v.value === 'Draw' ? 'X' : '2';
+                const sublabel = v.value === 'Home' ? 'Local' : v.value === 'Draw' ? 'Empate' : 'Visitante';
+                return (
+                  <a key={v.value} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+                    padding: '12px 8px', borderRadius: 10,
+                    background: 'linear-gradient(145deg, rgba(16,185,129,0.08), rgba(16,185,129,0.02))',
+                    border: '1px solid rgba(16,185,129,0.2)',
+                    textDecoration: 'none', transition: 'all 0.2s ease',
+                  }}>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)', letterSpacing: '0.5px' }}>{sublabel}</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: 'rgba(16,185,129,0.6)', fontFamily: 'var(--font-mono)' }}>{label}</span>
+                    <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{v.odd}</span>
+                  </a>
+                );
+              })}
             </div>
           </div>
 
+          {/* Over/Under */}
           {overUnder && (
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>OVER / UNDER</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {overUnder.values.map((v: any, i: number) => (
-                  <a key={i} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="odd-pill">
-                    <span className="odd-pill-label">{v.value}</span>
-                    <span className="odd-pill-value">{v.odd}</span>
-                  </a>
-                ))}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px' }}>Goles Over / Under</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(70px, 1fr))', gap: 6 }}>
+                {overUnder.values.map((v: any, i: number) => {
+                  const isOver = (v.value || '').toLowerCase().startsWith('over');
+                  return (
+                    <a key={i} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                      padding: '8px 4px', borderRadius: 8,
+                      background: isOver ? 'rgba(16,185,129,0.06)' : 'rgba(6,182,212,0.06)',
+                      border: `1px solid ${isOver ? 'rgba(16,185,129,0.15)' : 'rgba(6,182,212,0.15)'}`,
+                      textDecoration: 'none', transition: 'all 0.2s ease',
+                    }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--text-dim)', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{v.value}</span>
+                      <span style={{ fontSize: 15, fontWeight: 800, color: isOver ? 'var(--accent-green)' : 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>{v.odd}</span>
+                    </a>
+                  );
+                })}
               </div>
             </div>
           )}
 
+          {/* BTTS */}
           {btts && (
-            <div style={{ marginBottom: 4 }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>AMBOS MARCAN</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {btts.values.map((v: any) => (
-                  <a key={v.value} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" className="odd-pill" style={{ flex: 1 }}>
-                    <span className="odd-pill-label">{v.value === 'Yes' ? 'Sí' : 'No'}</span>
-                    <span className="odd-pill-value">{v.odd}</span>
-                  </a>
-                ))}
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', marginBottom: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1.2px' }}>Ambos marcan</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {btts.values.map((v: any) => {
+                  const isSi = v.value === 'Yes';
+                  return (
+                    <a key={v.value} href={AFFILIATE_LINK} target="_blank" rel="noopener noreferrer" style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                      padding: '12px 8px', borderRadius: 10,
+                      background: isSi ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.06)',
+                      border: `1px solid ${isSi ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.15)'}`,
+                      textDecoration: 'none', transition: 'all 0.2s ease',
+                    }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-dim)' }}>{isSi ? 'Sí' : 'No'}</span>
+                      <span style={{ fontSize: 20, fontWeight: 800, color: isSi ? 'var(--accent-green)' : '#ef4444', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>{v.odd}</span>
+                    </a>
+                  );
+                })}
               </div>
             </div>
           )}

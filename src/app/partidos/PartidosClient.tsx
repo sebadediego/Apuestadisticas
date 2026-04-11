@@ -3,8 +3,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import LeagueAccordion from '@/components/LeagueAccordion';
+import CountrySection from '@/components/CountrySection';
 import Banner1Win from '@/components/Banner1Win';
 import { filterRelevantLeagues } from '@/lib/league-filter';
+import { groupLeaguesByCountry } from '@/lib/country-groups';
 
 interface LeagueData {
   id: number;
@@ -52,14 +54,14 @@ export default function PartidosClient({
     router.push(`/partidos?date=${date}`);
   }
 
-  // Client-side filtering — primero filtrar ligas irrelevantes
   const relevantLeagues = filterRelevantLeagues(leagues, search);
 
   let filteredLeagues = selectedLeague
     ? relevantLeagues.filter(l => l.id === selectedLeague)
     : relevantLeagues;
 
-  // Search filtering
+  const isSearching = search.trim().length > 0 || selectedLeague !== null;
+
   if (search.trim()) {
     const q = search.toLowerCase();
     filteredLeagues = filteredLeagues.filter(l => {
@@ -74,6 +76,7 @@ export default function PartidosClient({
   }
 
   const dateChips = getDateChips(currentDate);
+  const { international, priorityGroups, otherGroups } = groupLeaguesByCountry(filteredLeagues);
 
   return (
     <div className="layout-main">
@@ -83,7 +86,6 @@ export default function PartidosClient({
         </div>
       </div>
 
-      {/* Date navigation */}
       <div className="date-nav">
         {dateChips.map((chip) => (
           <button
@@ -96,7 +98,6 @@ export default function PartidosClient({
         ))}
       </div>
 
-      {/* Search bar */}
       <div className="search-bar-wrapper">
         <svg className="search-bar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
@@ -104,13 +105,12 @@ export default function PartidosClient({
         <input
           type="text"
           className="search-bar-input"
-          placeholder="Buscar liga o equipo..."
+          placeholder="Buscar liga, equipo o país..."
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
       </div>
 
-      {/* League filter — CLIENT SIDE */}
       <div style={{ padding: '0 0 8px' }}>
         <select
           className="filter-select"
@@ -122,9 +122,7 @@ export default function PartidosClient({
         >
           <option value="all">Todas las ligas ({availableLeagues.length})</option>
           {availableLeagues.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name}
-            </option>
+            <option key={l.id} value={l.id}>{l.name}</option>
           ))}
         </select>
       </div>
@@ -133,7 +131,7 @@ export default function PartidosClient({
         <div className="empty-state">
           <p>No hay partidos para esta fecha{selectedLeague ? ' y liga seleccionada' : ''}</p>
         </div>
-      ) : (
+      ) : isSearching ? (
         filteredLeagues.map((leagueData, index) => (
           <div key={leagueData.id}>
             <LeagueAccordion league={leagueData.league} fixtures={leagueData.fixtures} oddsMap={oddsMap} defaultOpen={index < 3} />
@@ -142,6 +140,58 @@ export default function PartidosClient({
             )}
           </div>
         ))
+      ) : (
+        <>
+          {international.length > 0 && (
+            <>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: 'var(--accent-cyan)',
+                textTransform: 'uppercase', letterSpacing: '1px',
+                padding: '8px 4px 6px', display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span>🌍</span> Internacionales
+              </div>
+              {international.map((l) => (
+                <LeagueAccordion key={l.id} league={l.league} fixtures={l.fixtures} oddsMap={oddsMap} defaultOpen={true} />
+              ))}
+            </>
+          )}
+
+          {priorityGroups.length > 0 && (
+            <>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: 'var(--accent-green)',
+                textTransform: 'uppercase', letterSpacing: '1px',
+                padding: '12px 4px 6px', display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span>⭐</span> Ligas principales
+              </div>
+              {priorityGroups.map((group, index) => (
+                <div key={group.country}>
+                  <CountrySection group={group} oddsMap={oddsMap} defaultOpen={index < 3} />
+                  {(index + 1) % 3 === 0 && index < priorityGroups.length - 1 && (
+                    <Banner1Win variant="inline" />
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
+          {otherGroups.length > 0 && (
+            <>
+              <div style={{
+                fontSize: 11, fontWeight: 700, color: 'var(--text-muted)',
+                textTransform: 'uppercase', letterSpacing: '1px',
+                padding: '12px 4px 6px', display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span>🌐</span> Otras ligas
+              </div>
+              {otherGroups.map((group) => (
+                <CountrySection key={group.country} group={group} oddsMap={oddsMap} defaultOpen={false} />
+              ))}
+            </>
+          )}
+        </>
       )}
     </div>
   );
